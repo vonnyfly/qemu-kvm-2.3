@@ -1,0 +1,116 @@
+From 74598cf78b1a986279e97f6b1de283d7b3cc0334 Mon Sep 17 00:00:00 2001
+From: Victor Kaplansky <victork@redhat.com>
+Date: Sun, 28 Feb 2016 15:53:38 +0100
+Subject: [PATCH 3/3] vhost-user: don't merge regions with different fds
+
+RH-Author: Victor Kaplansky <victork@redhat.com>
+Message-id: <1456674284-916-1-git-send-email-victork@redhat.com>
+Patchwork-id: 69516
+O-Subject: [PATCH RHEV 7.2.z] vhost-user: don't merge regions with different fds
+Bugzilla: 1315197
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
+RH-Acked-by: Michael S. Tsirkin <mst@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+
+This fixes wrong memory region merging, which causes some memory
+regions especially with several NUMA fragments to associate with
+incorrect file handlers.
+
+From: "Michael S. Tsirkin" <mst@redhat.com>
+
+vhost currently merges regions with contiguious virtual and physical
+addresses.  This breaks for vhost-user since that also needs fds to
+match.
+
+Add a vhost_ops entry to compare the fds for vhost-user only.
+
+Cc: Victor Kaplansky <victork@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Victor Kaplansky <victork@redhat.com>
+(cherry picked from commit ffe42cc14c770549abc7995a90cf53bca3659b7f)
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ hw/virtio/vhost-user.c            | 20 ++++++++++++++++++++
+ hw/virtio/vhost.c                 |  7 +++++++
+ include/hw/virtio/vhost-backend.h |  4 ++++
+ 3 files changed, 31 insertions(+)
+
+diff --git a/hw/virtio/vhost-user.c b/hw/virtio/vhost-user.c
+index 18818d2..e6b78ca 100644
+--- a/hw/virtio/vhost-user.c
++++ b/hw/virtio/vhost-user.c
+@@ -541,6 +541,25 @@ static int vhost_user_migration_done(struct vhost_dev *dev, char* mac_addr)
+     return -1;
+ }
+ 
++static bool vhost_user_can_merge(struct vhost_dev *dev,
++                                 uint64_t start1, uint64_t size1,
++                                 uint64_t start2, uint64_t size2)
++{
++    ram_addr_t ram_addr;
++    int mfd, rfd;
++    MemoryRegion *mr;
++
++    mr = qemu_ram_addr_from_host((void *)(uintptr_t)start1, &ram_addr);
++    assert(mr);
++    mfd = qemu_get_ram_fd(ram_addr);
++
++    mr = qemu_ram_addr_from_host((void *)(uintptr_t)start2, &ram_addr);
++    assert(mr);
++    rfd = qemu_get_ram_fd(ram_addr);
++
++    return mfd == rfd;
++}
++
+ const VhostOps user_ops = {
+         .backend_type = VHOST_BACKEND_TYPE_USER,
+         .vhost_call = vhost_user_call,
+@@ -551,4 +570,5 @@ const VhostOps user_ops = {
+         .vhost_set_log_base = vhost_set_log_base,
+         .vhost_requires_shm_log = vhost_user_requires_shm_log,
+         .vhost_migration_done = vhost_user_migration_done,
++        .vhost_backend_can_merge = vhost_user_can_merge,
+ };
+diff --git a/hw/virtio/vhost.c b/hw/virtio/vhost.c
+index 439c130..a04db26 100644
+--- a/hw/virtio/vhost.c
++++ b/hw/virtio/vhost.c
+@@ -243,6 +243,13 @@ static void vhost_dev_assign_memory(struct vhost_dev *dev,
+             continue;
+         }
+ 
++        if (dev->vhost_ops->vhost_backend_can_merge &&
++            !dev->vhost_ops->vhost_backend_can_merge(dev, uaddr, size,
++                                                     reg->userspace_addr,
++                                                     reg->memory_size)) {
++            continue;
++        }
++
+         if (merged) {
+             --to;
+             assert(to >= 0);
+diff --git a/include/hw/virtio/vhost-backend.h b/include/hw/virtio/vhost-backend.h
+index 45a1234..e2c5c7c 100644
+--- a/include/hw/virtio/vhost-backend.h
++++ b/include/hw/virtio/vhost-backend.h
+@@ -35,6 +35,9 @@ typedef int (*vhost_set_log_base_op)(struct vhost_dev *dev, uint64_t base,
+ typedef bool (*vhost_requires_shm_log_op)(struct vhost_dev *dev);
+ typedef int (*vhost_migration_done_op)(struct vhost_dev *dev,
+                                        char *mac_addr);
++typedef bool (*vhost_backend_can_merge_op)(struct vhost_dev *dev,
++                                           uint64_t start1, uint64_t size1,
++                                           uint64_t start2, uint64_t size2);
+ 
+ typedef struct VhostOps {
+     VhostBackendType backend_type;
+@@ -46,6 +49,7 @@ typedef struct VhostOps {
+     vhost_set_log_base_op vhost_set_log_base;
+     vhost_requires_shm_log_op vhost_requires_shm_log;
+     vhost_migration_done_op vhost_migration_done;
++    vhost_backend_can_merge_op vhost_backend_can_merge;
+ } VhostOps;
+ 
+ extern const VhostOps user_ops;
+-- 
+1.8.3.1
+

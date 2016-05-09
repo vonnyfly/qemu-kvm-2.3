@@ -1,0 +1,179 @@
+From 5d85d3a58ae08eacf19360df36f86197d966abad Mon Sep 17 00:00:00 2001
+From: Victor Kaplansky <victork@redhat.com>
+Date: Sun, 28 Feb 2016 15:37:50 +0100
+Subject: [PATCH 2/3] vhost-user interrupt management fixes
+
+RH-Author: Victor Kaplansky <victork@redhat.com>
+Message-id: <1456673583-705-3-git-send-email-victork@redhat.com>
+Patchwork-id: 69515
+O-Subject: [PATCH RHEV 7.2.z 2/2] vhost-user interrupt management fixes
+Bugzilla: 1315198
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Thomas Huth <thuth@redhat.com>
+RH-Acked-by: Michael S. Tsirkin <mst@redhat.com>
+
+This fixes wrong memory region merging, which causes some memory
+regions especially with several NUMA fragments to associate with
+incorrect file handlers.
+
+From: "Michael S. Tsirkin" <mst@redhat.com>
+
+vhost currently merges regions with contiguious virtual and physical
+addresses.  This breaks for vhost-user since that also needs fds to
+match.
+
+Add a vhost_ops entry to compare the fds for vhost-user only.
+
+Cc: Victor Kaplansky <victork@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Victor Kaplansky <victork@redhat.com>
+(cherry picked from commit ffe42cc14c770549abc7995a90cf53bca3659b7f)
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ hw/net/vhost_net.c         | 15 +++++++++++++--
+ hw/virtio/vhost.c          |  9 +++++++++
+ hw/virtio/virtio-pci.c     | 14 ++++++++------
+ hw/virtio/virtio.c         |  1 +
+ include/hw/virtio/virtio.h |  1 +
+ 5 files changed, 32 insertions(+), 8 deletions(-)
+
+diff --git a/hw/net/vhost_net.c b/hw/net/vhost_net.c
+index acf11e7..de23cd6 100644
+--- a/hw/net/vhost_net.c
++++ b/hw/net/vhost_net.c
+@@ -317,8 +317,19 @@ int vhost_net_start(VirtIODevice *dev, NetClientState *ncs,
+     }
+ 
+     for (i = 0; i < total_queues; i++) {
+-        vhost_net_set_vq_index(get_vhost_net(ncs[i].peer), i * 2);
+-    }
++        struct vhost_net *net;
++
++        net = get_vhost_net(ncs[i].peer);
++        vhost_net_set_vq_index(net, i * 2);
++
++        /* Suppress the masking guest notifiers on vhost user
++         * because vhost user doesn't interrupt masking/unmasking
++         * properly.
++         */
++        if (net->nc->info->type == NET_CLIENT_OPTIONS_KIND_VHOST_USER) {
++                dev->use_guest_notifier_mask = false;
++        }
++     }
+ 
+     r = k->set_guest_notifiers(qbus->parent, total_queues * 2, true);
+     if (r < 0) {
+diff --git a/hw/virtio/vhost.c b/hw/virtio/vhost.c
+index 7cfb2e0..439c130 100644
+--- a/hw/virtio/vhost.c
++++ b/hw/virtio/vhost.c
+@@ -832,6 +832,14 @@ static int vhost_virtqueue_start(struct vhost_dev *dev,
+     /* Clear and discard previous events if any. */
+     event_notifier_test_and_clear(&vq->masked_notifier);
+ 
++    /* Init vring in unmasked state, unless guest_notifier_mask
++     * will do it later.
++     */
++    if (!vdev->use_guest_notifier_mask) {
++        /* TODO: check and handle errors. */
++        vhost_virtqueue_mask(dev, vdev, idx, false);
++    }
++
+     return 0;
+ 
+ fail_kick:
+@@ -1115,6 +1123,7 @@ void vhost_virtqueue_mask(struct vhost_dev *hdev, VirtIODevice *vdev, int n,
+     struct vhost_vring_file file;
+ 
+     if (mask) {
++        assert(vdev->use_guest_notifier_mask);
+         file.fd = event_notifier_get_fd(&hdev->vqs[index].masked_notifier);
+     } else {
+         file.fd = event_notifier_get_fd(virtio_queue_get_guest_notifier(vvq));
+diff --git a/hw/virtio/virtio-pci.c b/hw/virtio/virtio-pci.c
+index 35bf709..1f42dcc 100644
+--- a/hw/virtio/virtio-pci.c
++++ b/hw/virtio/virtio-pci.c
+@@ -538,7 +538,7 @@ static int kvm_virtio_pci_vector_use(VirtIOPCIProxy *proxy, int nvqs)
+         /* If guest supports masking, set up irqfd now.
+          * Otherwise, delay until unmasked in the frontend.
+          */
+-        if (k->guest_notifier_mask) {
++        if (vdev->use_guest_notifier_mask && k->guest_notifier_mask) {
+             ret = kvm_virtio_pci_irqfd_use(proxy, queue_no, vector);
+             if (ret < 0) {
+                 kvm_virtio_pci_vq_vector_release(proxy, vector);
+@@ -554,7 +554,7 @@ undo:
+         if (vector >= msix_nr_vectors_allocated(dev)) {
+             continue;
+         }
+-        if (k->guest_notifier_mask) {
++        if (vdev->use_guest_notifier_mask && k->guest_notifier_mask) {
+             kvm_virtio_pci_irqfd_release(proxy, queue_no, vector);
+         }
+         kvm_virtio_pci_vq_vector_release(proxy, vector);
+@@ -581,7 +581,7 @@ static void kvm_virtio_pci_vector_release(VirtIOPCIProxy *proxy, int nvqs)
+         /* If guest supports masking, clean up irqfd now.
+          * Otherwise, it was cleaned when masked in the frontend.
+          */
+-        if (k->guest_notifier_mask) {
++        if (vdev->use_guest_notifier_mask && k->guest_notifier_mask) {
+             kvm_virtio_pci_irqfd_release(proxy, queue_no, vector);
+         }
+         kvm_virtio_pci_vq_vector_release(proxy, vector);
+@@ -613,7 +613,7 @@ static int virtio_pci_vq_vector_unmask(VirtIOPCIProxy *proxy,
+     /* If guest supports masking, irqfd is already setup, unmask it.
+      * Otherwise, set it up now.
+      */
+-    if (k->guest_notifier_mask) {
++    if (vdev->use_guest_notifier_mask && k->guest_notifier_mask) {
+         k->guest_notifier_mask(vdev, queue_no, false);
+         /* Test after unmasking to avoid losing events. */
+         if (k->guest_notifier_pending &&
+@@ -636,7 +636,7 @@ static void virtio_pci_vq_vector_mask(VirtIOPCIProxy *proxy,
+     /* If guest supports masking, keep irqfd but mask it.
+      * Otherwise, clean it up now.
+      */ 
+-    if (k->guest_notifier_mask) {
++    if (vdev->use_guest_notifier_mask && k->guest_notifier_mask) {
+         k->guest_notifier_mask(vdev, queue_no, true);
+     } else {
+         kvm_virtio_pci_irqfd_release(proxy, queue_no, vector);
+@@ -753,7 +753,9 @@ static int virtio_pci_set_guest_notifier(DeviceState *d, int n, bool assign,
+         event_notifier_cleanup(notifier);
+     }
+ 
+-    if (!msix_enabled(&proxy->pci_dev) && vdc->guest_notifier_mask) {
++    if (!msix_enabled(&proxy->pci_dev) &&
++        vdev->use_guest_notifier_mask &&
++        vdc->guest_notifier_mask) {
+         vdc->guest_notifier_mask(vdev, n, !assign);
+     }
+ 
+diff --git a/hw/virtio/virtio.c b/hw/virtio/virtio.c
+index 05346be..ce8b943 100644
+--- a/hw/virtio/virtio.c
++++ b/hw/virtio/virtio.c
+@@ -1460,6 +1460,7 @@ void virtio_init(VirtIODevice *vdev, const char *name,
+     vdev->vmstate = qemu_add_vm_change_state_handler(virtio_vmstate_change,
+                                                      vdev);
+     vdev->device_endian = virtio_default_endian();
++    vdev->use_guest_notifier_mask = true;
+ }
+ 
+ hwaddr virtio_queue_get_desc_addr(VirtIODevice *vdev, int n)
+diff --git a/include/hw/virtio/virtio.h b/include/hw/virtio/virtio.h
+index 76a1fc8..2fcbb66 100644
+--- a/include/hw/virtio/virtio.h
++++ b/include/hw/virtio/virtio.h
+@@ -90,6 +90,7 @@ struct VirtIODevice
+     VMChangeStateEntry *vmstate;
+     char *bus_name;
+     uint8_t device_endian;
++    bool use_guest_notifier_mask;
+     QLIST_HEAD(, VirtQueue) *vector_queues;
+ };
+ 
+-- 
+1.8.3.1
+

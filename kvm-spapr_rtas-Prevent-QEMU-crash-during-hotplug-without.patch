@@ -1,0 +1,86 @@
+From 24b496ca41a2bca1dc2c94c76fd4e7cd08bcba76 Mon Sep 17 00:00:00 2001
+From: Laurent Vivier <lvivier@redhat.com>
+Date: Mon, 25 Jan 2016 16:20:15 +0100
+Subject: [PATCH] spapr_rtas: Prevent QEMU crash during hotplug without a prior
+ device_add
+
+RH-Author: Laurent Vivier <lvivier@redhat.com>
+Message-id: <1453738815-15286-1-git-send-email-lvivier@redhat.com>
+Patchwork-id: 68852
+O-Subject: [RHEL-7.2.z qemu-kvm-rhev PATCH] spapr_rtas: Prevent QEMU crash during hotplug without a prior device_add
+Bugzilla: 1306343
+RH-Acked-by: David Gibson <dgibson@redhat.com>
+RH-Acked-by: Thomas Huth <thuth@redhat.com>
+RH-Acked-by: Laszlo Ersek <lersek@redhat.com>
+
+From: Bharata B Rao <bharata@linux.vnet.ibm.com>
+
+If drmgr is used in the guest to hotplug a device before a device_add
+has been issued via the QEMU monitor, QEMU segfaults in configure_connector
+call. This occurs due to accessing of NULL FDT which otherwise would have
+been created and associated with the DRC during device_add command.
+
+Check for NULL FDT and return failure from configure_connector call.
+As per PAPR+, an error value of -9003 seems appropriate for this failure.
+
+Signed-off-by: Bharata B Rao <bharata@linux.vnet.ibm.com>
+Cc: Michael Roth <mdroth@linux.vnet.ibm.com>
+Reviewed-by: David Gibson <david@gibson.dropbear.id.au>
+Signed-off-by: David Gibson <david@gibson.dropbear.id.au>
+(cherry picked from commit e6fc9568c865f2f81499475a4e322cd563fdfd90)
+Signed-off-by: Laurent Vivier <lvivier@redhat.com>
+
+BZ:   https://bugzilla.redhat.com/show_bug.cgi?id=1299030
+BREW: https://brewweb.devel.redhat.com/taskinfo?taskID=10387078
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ hw/ppc/spapr_rtas.c        |  6 ++++++
+ include/hw/ppc/spapr_drc.h | 15 ++++++++-------
+ 2 files changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/hw/ppc/spapr_rtas.c b/hw/ppc/spapr_rtas.c
+index 2986f94..f57b5e0 100644
+--- a/hw/ppc/spapr_rtas.c
++++ b/hw/ppc/spapr_rtas.c
+@@ -515,6 +515,12 @@ static void rtas_ibm_configure_connector(PowerPCCPU *cpu,
+ 
+     drck = SPAPR_DR_CONNECTOR_GET_CLASS(drc);
+     fdt = drck->get_fdt(drc, NULL);
++    if (!fdt) {
++        DPRINTF("rtas_ibm_configure_connector: Missing FDT for DRC index: %xh\n",
++                drc_index);
++        rc = SPAPR_DR_CC_RESPONSE_NOT_CONFIGURABLE;
++        goto out;
++    }
+ 
+     ccs = spapr_ccs_find(spapr, drc_index);
+     if (!ccs) {
+diff --git a/include/hw/ppc/spapr_drc.h b/include/hw/ppc/spapr_drc.h
+index 60cda35..28ffeae 100644
+--- a/include/hw/ppc/spapr_drc.h
++++ b/include/hw/ppc/spapr_drc.h
+@@ -119,13 +119,14 @@ typedef enum {
+ } sPAPRDREntitySense;
+ 
+ typedef enum {
+-    SPAPR_DR_CC_RESPONSE_NEXT_SIB       = 1, /* currently unused */
+-    SPAPR_DR_CC_RESPONSE_NEXT_CHILD     = 2,
+-    SPAPR_DR_CC_RESPONSE_NEXT_PROPERTY  = 3,
+-    SPAPR_DR_CC_RESPONSE_PREV_PARENT    = 4,
+-    SPAPR_DR_CC_RESPONSE_SUCCESS        = 0,
+-    SPAPR_DR_CC_RESPONSE_ERROR          = -1,
+-    SPAPR_DR_CC_RESPONSE_CONTINUE       = -2,
++    SPAPR_DR_CC_RESPONSE_NEXT_SIB         = 1, /* currently unused */
++    SPAPR_DR_CC_RESPONSE_NEXT_CHILD       = 2,
++    SPAPR_DR_CC_RESPONSE_NEXT_PROPERTY    = 3,
++    SPAPR_DR_CC_RESPONSE_PREV_PARENT      = 4,
++    SPAPR_DR_CC_RESPONSE_SUCCESS          = 0,
++    SPAPR_DR_CC_RESPONSE_ERROR            = -1,
++    SPAPR_DR_CC_RESPONSE_CONTINUE         = -2,
++    SPAPR_DR_CC_RESPONSE_NOT_CONFIGURABLE = -9003,
+ } sPAPRDRCCResponse;
+ 
+ typedef void (spapr_drc_detach_cb)(DeviceState *d, void *opaque);
+-- 
+1.8.3.1
+
