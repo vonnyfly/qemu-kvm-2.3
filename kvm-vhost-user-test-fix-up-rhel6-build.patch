@@ -1,0 +1,107 @@
+From e540ac5f25bfd7adc470df4da0ee4e6ad99be9f0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 20 Jun 2016 09:06:42 +0200
+Subject: [PATCH 03/16] vhost-user-test: fix up rhel6 build
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <1466413615-23069-4-git-send-email-marcandre.lureau@redhat.com>
+Patchwork-id: 70695
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH v2 03/16] vhost-user-test: fix up rhel6 build
+Bugzilla: 1348593
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+RH-Acked-by: Victor Kaplansky <vkaplans@redhat.com>
+
+From: "Michael S. Tsirkin" <mst@redhat.com>
+
+Build on RHEL6 fails:
+https://gcc.gnu.org/bugzilla/show_bug.cgi?id=42875
+
+Apparently unnamed unions couldn't use C99  named field initializers.
+Let's just name the payload union field.
+
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+
+(cherry picked from commit 12ebf6908333a86775ef18f12ea283601fd1d2df)
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ tests/vhost-user-test.c | 20 ++++++++++----------
+ 1 file changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/tests/vhost-user-test.c b/tests/vhost-user-test.c
+index c5ede1e..022223b 100644
+--- a/tests/vhost-user-test.c
++++ b/tests/vhost-user-test.c
+@@ -107,7 +107,7 @@ typedef struct VhostUserMsg {
+         struct vhost_vring_addr addr;
+         VhostUserMemory memory;
+         VhostUserLog log;
+-    };
++    } payload;
+ } QEMU_PACKED VhostUserMsg;
+ 
+ static VhostUserMsg m __attribute__ ((unused));
+@@ -251,23 +251,23 @@ static void chr_read(void *opaque, const uint8_t *buf, int size)
+     case VHOST_USER_GET_FEATURES:
+         /* send back features to qemu */
+         msg.flags |= VHOST_USER_REPLY_MASK;
+-        msg.size = sizeof(m.u64);
+-        msg.u64 = 0x1ULL << VHOST_F_LOG_ALL |
++        msg.size = sizeof(m.payload.u64);
++        msg.payload.u64 = 0x1ULL << VHOST_F_LOG_ALL |
+             0x1ULL << VHOST_USER_F_PROTOCOL_FEATURES;
+         p = (uint8_t *) &msg;
+         qemu_chr_fe_write_all(chr, p, VHOST_USER_HDR_SIZE + msg.size);
+         break;
+ 
+     case VHOST_USER_SET_FEATURES:
+-	g_assert_cmpint(msg.u64 & (0x1ULL << VHOST_USER_F_PROTOCOL_FEATURES),
++	g_assert_cmpint(msg.payload.u64 & (0x1ULL << VHOST_USER_F_PROTOCOL_FEATURES),
+ 			!=, 0ULL);
+         break;
+ 
+     case VHOST_USER_GET_PROTOCOL_FEATURES:
+         /* send back features to qemu */
+         msg.flags |= VHOST_USER_REPLY_MASK;
+-        msg.size = sizeof(m.u64);
+-        msg.u64 = 1 << VHOST_USER_PROTOCOL_F_LOG_SHMFD;
++        msg.size = sizeof(m.payload.u64);
++        msg.payload.u64 = 1 << VHOST_USER_PROTOCOL_F_LOG_SHMFD;
+         p = (uint8_t *) &msg;
+         qemu_chr_fe_write_all(chr, p, VHOST_USER_HDR_SIZE + msg.size);
+         break;
+@@ -275,15 +275,15 @@ static void chr_read(void *opaque, const uint8_t *buf, int size)
+     case VHOST_USER_GET_VRING_BASE:
+         /* send back vring base to qemu */
+         msg.flags |= VHOST_USER_REPLY_MASK;
+-        msg.size = sizeof(m.state);
+-        msg.state.num = 0;
++        msg.size = sizeof(m.payload.state);
++        msg.payload.state.num = 0;
+         p = (uint8_t *) &msg;
+         qemu_chr_fe_write_all(chr, p, VHOST_USER_HDR_SIZE + msg.size);
+         break;
+ 
+     case VHOST_USER_SET_MEM_TABLE:
+         /* received the mem table */
+-        memcpy(&s->memory, &msg.memory, sizeof(msg.memory));
++        memcpy(&s->memory, &msg.payload.memory, sizeof(msg.payload.memory));
+         s->fds_num = qemu_chr_fe_get_msgfds(chr, s->fds, G_N_ELEMENTS(s->fds));
+ 
+         /* signal the test that it can continue */
+@@ -317,7 +317,7 @@ static void chr_read(void *opaque, const uint8_t *buf, int size)
+         break;
+ 
+     case VHOST_USER_SET_VRING_ENABLE:
+-        if (!msg.state.num) {
++        if (!msg.payload.state.num) {
+             s->fds_num = 0;
+         }
+         break;
+-- 
+1.8.3.1
+

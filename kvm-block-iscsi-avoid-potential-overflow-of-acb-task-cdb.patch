@@ -1,0 +1,58 @@
+From d4a21995e7cdef9054d2c2bd8b9e9bec0018fb5d Mon Sep 17 00:00:00 2001
+From: Fam Zheng <famz@redhat.com>
+Date: Fri, 29 Jul 2016 09:18:18 +0200
+Subject: [PATCH] block/iscsi: avoid potential overflow of acb->task->cdb
+
+RH-Author: Fam Zheng <famz@redhat.com>
+Message-id: <1469783898-2644-1-git-send-email-famz@redhat.com>
+Patchwork-id: 71516
+O-Subject: [RHEL-7.2.z qemu-kvm-rhev PATCH] block/iscsi: avoid potential overflow of acb->task->cdb
+Bugzilla: 1358997
+RH-Acked-by: Stefan Hajnoczi <stefanha@redhat.com>
+RH-Acked-by: Laszlo Ersek <lersek@redhat.com>
+RH-Acked-by: Laurent Vivier <lvivier@redhat.com>
+
+From: Peter Lieven <pl@kamp.de>
+
+at least in the path via virtio-blk the maximum size is not
+restricted.
+
+Cc: qemu-stable@nongnu.org
+Signed-off-by: Peter Lieven <pl@kamp.de>
+Message-Id: <1464080368-29584-1-git-send-email-pl@kamp.de>
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+(cherry picked from commit a6b3167fa0e825aebb5a7cd8b437b6d41584a196)
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+
+Conflicts:
+	block/iscsi.c
+
+Context conflict because downstream doesn't have 4bb17ab51 (iscsi:
+Emulate commands in iscsi_aio_ioctl as iscsi_ioctl).
+
+Signed-off-by: Fam Zheng <famz@redhat.com>
+---
+ block/iscsi.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/block/iscsi.c b/block/iscsi.c
+index 3996933..755bead 100644
+--- a/block/iscsi.c
++++ b/block/iscsi.c
+@@ -706,6 +706,13 @@ static BlockAIOCB *iscsi_aio_ioctl(BlockDriverState *bs,
+     acb->buf         = NULL;
+     acb->ioh         = buf;
+ 
++    if (acb->ioh->cmd_len > SCSI_CDB_MAX_SIZE) {
++        error_report("iSCSI: ioctl error CDB exceeds max size (%d > %d)",
++                     acb->ioh->cmd_len, SCSI_CDB_MAX_SIZE);
++        qemu_aio_unref(acb);
++        return NULL;
++    }
++
+     acb->task = malloc(sizeof(struct scsi_task));
+     if (acb->task == NULL) {
+         error_report("iSCSI: Failed to allocate task for scsi command. %s",
+-- 
+1.8.3.1
+

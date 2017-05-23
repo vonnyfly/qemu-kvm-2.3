@@ -1,0 +1,152 @@
+From 97f4174dd42310fa8247e92201d8dfe30f4d6c39 Mon Sep 17 00:00:00 2001
+From: Jeffrey Cody <jcody@redhat.com>
+Date: Mon, 18 Apr 2016 20:17:01 +0200
+Subject: [PATCH 3/5] qemu-iotests: Test that "stop" doesn't drain block jobs
+
+RH-Author: Jeffrey Cody <jcody@redhat.com>
+Message-id: <1fb84e8b0494214fa750250986ea14a863214a03.1461009743.git.jcody@redhat.com>
+Patchwork-id: 70208
+O-Subject: [RHEV7.2.z qemu-kvm-rhev 3/4] qemu-iotests: Test that "stop" doesn't drain block jobs
+Bugzilla: 1329543
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+RH-Acked-by: Stefan Hajnoczi <stefanha@redhat.com>
+RH-Acked-by: Fam Zheng <famz@redhat.com>
+
+From: Fam Zheng <famz@redhat.com>
+
+Signed-off-by: Fam Zheng <famz@redhat.com>
+Reviewed-by: Stefan Hajnoczi <stefanha@redhat.com>
+Reviewed-by: Paolo Bonzini <pbonzini@redhat.com>
+Reviewed-by: Alberto Garcia <berto@igalia.com>
+Message-id: 1428069921-2957-4-git-send-email-famz@redhat.com
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+Signed-off-by: Kevin Wolf <kwolf@redhat.com>
+(cherry picked from commit e62303a437af72141c8d04c36799521a56d6f4f6)
+Signed-off-by: Jeff Cody <jcody@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ tests/qemu-iotests/129     | 86 ++++++++++++++++++++++++++++++++++++++++++++++
+ tests/qemu-iotests/129.out |  5 +++
+ tests/qemu-iotests/group   |  1 +
+ 3 files changed, 92 insertions(+)
+ create mode 100644 tests/qemu-iotests/129
+ create mode 100644 tests/qemu-iotests/129.out
+
+diff --git a/tests/qemu-iotests/129 b/tests/qemu-iotests/129
+new file mode 100644
+index 0000000..9e87e1c
+--- /dev/null
++++ b/tests/qemu-iotests/129
+@@ -0,0 +1,86 @@
++#!/usr/bin/env python
++#
++# Tests that "bdrv_drain_all" doesn't drain block jobs
++#
++# Copyright (C) 2015 Red Hat, Inc.
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++#
++
++import os
++import iotests
++import time
++
++class TestStopWithBlockJob(iotests.QMPTestCase):
++    test_img = os.path.join(iotests.test_dir, 'test.img')
++    target_img = os.path.join(iotests.test_dir, 'target.img')
++    base_img = os.path.join(iotests.test_dir, 'base.img')
++
++    def setUp(self):
++        iotests.qemu_img('create', '-f', iotests.imgfmt, self.base_img, "1G")
++        iotests.qemu_img('create', '-f', iotests.imgfmt, self.test_img, "-b", self.base_img)
++        iotests.qemu_io('-f', iotests.imgfmt, '-c', 'write -P0x5d 1M 128M', self.test_img)
++        self.vm = iotests.VM().add_drive(self.test_img)
++        self.vm.launch()
++
++    def tearDown(self):
++        params = {"device": "drive0",
++                  "bps": 0,
++                  "bps_rd": 0,
++                  "bps_wr": 0,
++                  "iops": 0,
++                  "iops_rd": 0,
++                  "iops_wr": 0,
++                 }
++        result = self.vm.qmp("block_set_io_throttle", conv_keys=False,
++                             **params)
++        self.vm.shutdown()
++
++    def do_test_stop(self, cmd, **args):
++        """Test 'stop' while block job is running on a throttled drive.
++        The 'stop' command shouldn't drain the job"""
++        params = {"device": "drive0",
++                  "bps": 1024,
++                  "bps_rd": 0,
++                  "bps_wr": 0,
++                  "iops": 0,
++                  "iops_rd": 0,
++                  "iops_wr": 0,
++                 }
++        result = self.vm.qmp("block_set_io_throttle", conv_keys=False,
++                             **params)
++        self.assert_qmp(result, 'return', {})
++        result = self.vm.qmp(cmd, **args)
++        self.assert_qmp(result, 'return', {})
++        result = self.vm.qmp("stop")
++        self.assert_qmp(result, 'return', {})
++        result = self.vm.qmp("query-block-jobs")
++        self.assert_qmp(result, 'return[0]/busy', True)
++        self.assert_qmp(result, 'return[0]/ready', False)
++
++    def test_drive_mirror(self):
++        self.do_test_stop("drive-mirror", device="drive0",
++                          target=self.target_img,
++                          sync="full")
++
++    def test_drive_backup(self):
++        self.do_test_stop("drive-backup", device="drive0",
++                          target=self.target_img,
++                          sync="full")
++
++    def test_block_commit(self):
++        self.do_test_stop("block-commit", device="drive0")
++
++if __name__ == '__main__':
++    iotests.main(supported_fmts=["qcow2"])
+diff --git a/tests/qemu-iotests/129.out b/tests/qemu-iotests/129.out
+new file mode 100644
+index 0000000..8d7e996
+--- /dev/null
++++ b/tests/qemu-iotests/129.out
+@@ -0,0 +1,5 @@
++...
++----------------------------------------------------------------------
++Ran 3 tests
++
++OK
+diff --git a/tests/qemu-iotests/group b/tests/qemu-iotests/group
+index f8e3b02..7f37652 100644
+--- a/tests/qemu-iotests/group
++++ b/tests/qemu-iotests/group
+@@ -124,6 +124,7 @@
+ 121 rw auto
+ 123 rw auto quick
+ 128 rw auto quick
++129 rw auto quick
+ 130 rw auto quick
+ 132 rw auto quick
+ 138 rw auto quick
+-- 
+1.8.3.1
+

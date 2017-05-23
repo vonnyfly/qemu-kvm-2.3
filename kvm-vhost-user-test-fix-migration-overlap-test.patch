@@ -1,0 +1,80 @@
+From af9331a4f2671afe58f37fa339300beee19feb75 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 20 Jun 2016 09:06:43 +0200
+Subject: [PATCH 04/16] vhost-user-test: fix migration overlap test
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <1466413615-23069-5-git-send-email-marcandre.lureau@redhat.com>
+Patchwork-id: 70696
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH v2 04/16] vhost-user-test: fix migration overlap test
+Bugzilla: 1348593
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+RH-Acked-by: Victor Kaplansky <vkaplans@redhat.com>
+
+From: "Michael S. Tsirkin" <mst@redhat.com>
+
+During migration, source does GET_BASE, destination does SET_BASE.
+Use that as opposed to fds being configured to detect
+vhost user running on both source and destination.
+
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+
+(cherry picked from commit d08e42a1125d384cb53423f5810b0c7ea52dc6c9)
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ tests/vhost-user-test.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/tests/vhost-user-test.c b/tests/vhost-user-test.c
+index 022223b..e4c36af 100644
+--- a/tests/vhost-user-test.c
++++ b/tests/vhost-user-test.c
+@@ -131,6 +131,7 @@ typedef struct TestServer {
+     GMutex data_mutex;
+     GCond data_cond;
+     int log_fd;
++    uint64_t rings;
+ } TestServer;
+ 
+ #if !GLIB_CHECK_VERSION(2, 32, 0)
+@@ -279,6 +280,9 @@ static void chr_read(void *opaque, const uint8_t *buf, int size)
+         msg.payload.state.num = 0;
+         p = (uint8_t *) &msg;
+         qemu_chr_fe_write_all(chr, p, VHOST_USER_HDR_SIZE + msg.size);
++
++        assert(msg.payload.state.index < 2);
++        s->rings &= ~(0x1ULL << msg.payload.state.index);
+         break;
+ 
+     case VHOST_USER_SET_MEM_TABLE:
+@@ -316,10 +320,9 @@ static void chr_read(void *opaque, const uint8_t *buf, int size)
+         g_cond_signal(&s->data_cond);
+         break;
+ 
+-    case VHOST_USER_SET_VRING_ENABLE:
+-        if (!msg.payload.state.num) {
+-            s->fds_num = 0;
+-        }
++    case VHOST_USER_SET_VRING_BASE:
++        assert(msg.payload.state.index < 2);
++        s->rings |= 0x1ULL << msg.payload.state.index;
+         break;
+ 
+     default:
+@@ -486,7 +489,7 @@ static gboolean
+ test_migrate_source_check(GSource *source)
+ {
+     TestMigrateSource *t = (TestMigrateSource *)source;
+-    gboolean overlap = t->src->fds_num > 0 && t->dest->fds_num > 0;
++    gboolean overlap = t->src->rings && t->dest->rings;
+ 
+     g_assert(!overlap);
+ 
+-- 
+1.8.3.1
+

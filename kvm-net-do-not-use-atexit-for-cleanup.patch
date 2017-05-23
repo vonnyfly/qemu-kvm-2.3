@@ -1,0 +1,62 @@
+From 03db772bf13e79f6b7dd9d95d7c9553ab02324f6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Thu, 14 Jul 2016 20:57:13 +0200
+Subject: [PATCH 4/4] net: do not use atexit for cleanup
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <20160714205713.2562-5-marcandre.lureau@redhat.com>
+Patchwork-id: 71187
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH 4/4] net: do not use atexit for cleanup
+Bugzilla: 1354090
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+RH-Acked-by: Laurent Vivier <lvivier@redhat.com>
+
+From: Paolo Bonzini <pbonzini@redhat.com>
+
+This will be necessary in the next patch, which stops using atexit for
+character devices; without it, vhost-user and the redirector filter
+will cause a use-after-free.  Relying on the ordering of atexit calls
+is also brittle, even now that both the network and chardev
+subsystems are using atexit.
+
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+
+(cherry picked from commit 8caf911d3316b6eccc503cff0d9a68cf922950f1)
+vl.c onflicts due to commit ordering, and default_net handling change.
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ vl.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/vl.c b/vl.c
+index 0d51d29..f4bddfd 100644
+--- a/vl.c
++++ b/vl.c
+@@ -4155,9 +4155,6 @@ int main(int argc, char **argv, char **envp)
+         qemu_opts_del(icount_opts);
+     }
+ 
+-    /* clean up network at qemu process termination */
+-    atexit(&net_cleanup);
+-
+     if (net_init_clients() < 0) {
+         exit(1);
+     }
+@@ -4398,6 +4395,8 @@ int main(int argc, char **argv, char **envp)
+ #ifdef CONFIG_TPM
+     tpm_cleanup();
+ #endif
++    net_cleanup();
++
+     qemu_chr_cleanup();
+ 
+     return 0;
+-- 
+1.8.3.1
+

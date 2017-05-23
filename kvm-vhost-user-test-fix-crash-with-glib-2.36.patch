@@ -1,0 +1,69 @@
+From ce5be2867413900929406131439b4779132098d1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 20 Jun 2016 09:06:46 +0200
+Subject: [PATCH 07/16] vhost-user-test: fix crash with glib < 2.36
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <1466413615-23069-8-git-send-email-marcandre.lureau@redhat.com>
+Patchwork-id: 70699
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH v2 07/16] vhost-user-test: fix crash with glib < 2.36
+Bugzilla: 1348593
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+RH-Acked-by: Victor Kaplansky <vkaplans@redhat.com>
+
+From: Marc-André Lureau <marcandre.lureau@redhat.com>
+
+The prepare callback needs to be implemented with glib < 2.36,
+quoting glib documentation:
+"Since 2.36 this may be NULL, in which case the effect is as if the
+function always returns FALSE with a timeout of -1."
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+
+(cherry picked from commit 45ce512670f34d10be34448e621fd1484bea0ec6)
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ tests/vhost-user-test.c | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/tests/vhost-user-test.c b/tests/vhost-user-test.c
+index 29205ed..29de739 100644
+--- a/tests/vhost-user-test.c
++++ b/tests/vhost-user-test.c
+@@ -506,11 +506,22 @@ test_migrate_source_check(GSource *source)
+     return FALSE;
+ }
+ 
++#if !GLIB_CHECK_VERSION(2,36,0)
++/* this callback is unnecessary with glib >2.36, the default
++ * prepare for the source does the same */
++static gboolean
++test_migrate_source_prepare(GSource *source, gint *timeout)
++{
++    *timeout = -1;
++    return FALSE;
++}
++#endif
++
+ GSourceFuncs test_migrate_source_funcs = {
+-    NULL,
+-    test_migrate_source_check,
+-    NULL,
+-    NULL
++#if !GLIB_CHECK_VERSION(2,36,0)
++    .prepare = test_migrate_source_prepare,
++#endif
++    .check = test_migrate_source_check,
+ };
+ 
+ static void test_migrate(void)
+-- 
+1.8.3.1
+

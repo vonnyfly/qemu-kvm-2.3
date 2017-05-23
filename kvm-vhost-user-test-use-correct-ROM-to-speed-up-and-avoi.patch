@@ -1,0 +1,77 @@
+From c9a15347c6e40166490b5d406c90de0499540cbd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 20 Jun 2016 09:06:47 +0200
+Subject: [PATCH 08/16] vhost-user-test: use correct ROM to speed up and avoid
+ spurious failures
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <1466413615-23069-9-git-send-email-marcandre.lureau@redhat.com>
+Patchwork-id: 70700
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH v2 08/16] vhost-user-test: use correct ROM to speed up and avoid spurious failures
+Bugzilla: 1348593
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+RH-Acked-by: Victor Kaplansky <vkaplans@redhat.com>
+
+From: Paolo Bonzini <pbonzini@redhat.com>
+
+The mechanism to get the option ROM for virtio-net does not block the
+PCI ROM from being loaded. Therefore, in vhost-user-test there are
+two entries in the boot menu for the virtio-net card: one as an
+embedded option ROM, one from the ROM BAR.
+
+The embedded option ROM in vhost-user-test is the non-EFI-enabled,
+while the ROM BAR has an EFI-enabled ROM. The two are compiled with
+slightly different parameters, where only the old BIOS-only one doesn't
+have a timeout for the "Press Ctrl-B" banner. When using a new
+machine type, therefore, the vhost-user-test has to wait for the
+EFI-enabled ROM's banner to go away. There are several ways to fix
+this:
+
+1) fix the ROMs to have the same configuration
+
+2) add ",romfile=" to the -device line
+
+3) remove --option-rom and add the ROM file name to the -device line
+
+4) use an old machine type
+
+This patch chooses 3. In addition, the file name was wrong because
+qtest runs QEMU relative to the top build directory, not to the
+x86_64-softmmu/ subdirectory, which is fixed too.
+
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+
+(cherry picked from commit b5c6eaf173cbeec414b2d837c5703515f979f2af)
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ tests/vhost-user-test.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/tests/vhost-user-test.c b/tests/vhost-user-test.c
+index 29de739..01e3664 100644
+--- a/tests/vhost-user-test.c
++++ b/tests/vhost-user-test.c
+@@ -35,11 +35,10 @@
+                         "mem-path=%s,share=on -numa node,memdev=mem"
+ #define QEMU_CMD_CHR    " -chardev socket,id=%s,path=%s"
+ #define QEMU_CMD_NETDEV " -netdev vhost-user,id=net0,chardev=%s,vhostforce"
+-#define QEMU_CMD_NET    " -device virtio-net-pci,netdev=net0 "
+-#define QEMU_CMD_ROM    " -option-rom ../pc-bios/pxe-virtio.rom"
++#define QEMU_CMD_NET    " -device virtio-net-pci,netdev=net0,romfile=./pc-bios/pxe-virtio.rom"
+ 
+ #define QEMU_CMD        QEMU_CMD_ACCEL QEMU_CMD_MEM QEMU_CMD_CHR \
+-                        QEMU_CMD_NETDEV QEMU_CMD_NET QEMU_CMD_ROM
++                        QEMU_CMD_NETDEV QEMU_CMD_NET
+ 
+ #define HUGETLBFS_MAGIC       0x958458f6
+ 
+-- 
+1.8.3.1
+

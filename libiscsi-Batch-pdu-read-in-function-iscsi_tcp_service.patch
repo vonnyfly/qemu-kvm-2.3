@@ -1,0 +1,88 @@
+From 9cdb2cbce9d4f0db79b5c2cb534d5cacb5325dcb Mon Sep 17 00:00:00 2001
+From: keyue <keyue@smartx.com>
+Date: Wed, 7 Dec 2016 16:11:12 +0800
+Subject: [PATCH 1/6] Batch pdu read in function iscsi_tcp_service()
+
+- for 100G nic, batch num should be equal to 100G / 8 / 1000 / 1000 / 48 = 279.6 pdu per us
+- fix a bug with logging into a iscsi redirector server
+---
+ libiscsi-1.18.0/lib/socket.c | 47 +++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 37 insertions(+), 10 deletions(-)
+
+diff --git a/libiscsi-1.18.0/lib/socket.c b/libiscsi-1.18.0/lib/socket.c
+index 036b4f4..e338756 100644
+@@ -562,9 +562,11 @@ iscsi_iovector_readv_writev(struct iscsi_context *iscsi, struct scsi_iovector *i
+ 	return n;
+ }
+
+-static int
+-iscsi_read_from_socket(struct iscsi_context *iscsi)
+-{
++/* read one pdu from socket
++ *
++ */
++static int iscsi_read_pdu_from_socket(struct iscsi_context *iscsi,
++									  struct iscsi_in_pdu **pdu) {
+ 	struct iscsi_in_pdu *in;
+ 	ssize_t data_size, count, padding_size;
+
+@@ -586,6 +588,7 @@ iscsi_read_from_socket(struct iscsi_context *iscsi)
+ 		count = ISCSI_HEADER_SIZE - in->hdr_pos;
+ 		count = recv(iscsi->fd, &in->hdr[in->hdr_pos], count, 0);
+ 		if (count == 0) {
++			iscsi_set_error(iscsi, "read from closed socket");
+ 			return -1;
+ 		}
+ 		if (count < 0) {
+@@ -636,8 +639,9 @@ iscsi_read_from_socket(struct iscsi_context *iscsi)
+ 			}
+ 			count = recv(iscsi->fd, buf, count, 0);
+ 		}
+-
++
+ 		if (count == 0) {
++			iscsi_set_error(iscsi, "read from closed socket");
+ 			return -1;
+ 		}
+ 		if (count < 0) {
+@@ -653,6 +657,7 @@ iscsi_read_from_socket(struct iscsi_context *iscsi)
+ 		in->data_pos += count;
+ 	}
+
++	/* not enough data */
+ 	if (in->data_pos < data_size) {
+ 		return 0;
+ 	}
+@@ -660,7 +665,29 @@ iscsi_read_from_socket(struct iscsi_context *iscsi)
+ 	ISCSI_LIST_ADD_END(&iscsi->inqueue, in);
+ 	iscsi->incoming = NULL;
+
++	*pdu = in;
++	return 1;
++}
+
++// TODO(sahlberg) change this to 1 for AROS which doesn't support NONBLOCK io
++// actually
++#define READ_PDU_BATCH_COUNT 256
++
++static int iscsi_read_from_socket(struct iscsi_context *iscsi) {
++	int i;
++	/* we shouldn't do batch read on logging stage */
++	int batch_count  = iscsi->is_loggedin ? READ_PDU_BATCH_COUNT : 1;
++	for (i = 0; i < batch_count; ++i) {
++		struct iscsi_in_pdu *pdu;
++		int ret = iscsi_read_pdu_from_socket(iscsi, &pdu);
++		/* NODATA */
++		if (ret == 0) {
++			break;
++		}
++		if (ret < 0) {
++			return -1;
++		}
++	}
+ 	while (iscsi->inqueue != NULL) {
+ 		struct iscsi_in_pdu *current = iscsi->inqueue;
+
+--
+2.9.3
+

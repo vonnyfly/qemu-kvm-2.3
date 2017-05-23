@@ -1,0 +1,84 @@
+From 0706d1c4cad581d9f213e742a518be939b05a733 Mon Sep 17 00:00:00 2001
+From: Stefan Hajnoczi <stefanha@redhat.com>
+Date: Fri, 22 Apr 2016 10:09:35 +0200
+Subject: [PATCH 5/5] virtio-blk: use blk_io_plug/unplug for Linux AIO batching
+
+RH-Author: Stefan Hajnoczi <stefanha@redhat.com>
+Message-id: <1461319775-24446-2-git-send-email-stefanha@redhat.com>
+Patchwork-id: 70224
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH 1/1] virtio-blk: use blk_io_plug/unplug for Linux AIO batching
+Bugzilla: 1327613
+RH-Acked-by: Laurent Vivier <lvivier@redhat.com>
+RH-Acked-by: Fam Zheng <famz@redhat.com>
+RH-Acked-by: Kevin Wolf <kwolf@redhat.com>
+
+The raw-posix block driver implements Linux AIO batching so multiple
+requests can be submitted with a single io_submit(2) system call.
+Batching is currently only used by virtio-scsi and
+virtio-blk-data-plane.
+
+Enable batching for regular virtio-blk so the number of io_submit(2)
+system calls is reduced for workloads with queue depth > 1.
+
+In 4KB random read performance tests with queue depth 32, the CPU
+utilization on the host is reduced by 9.4%.  The fio job is as follows:
+
+  [global]
+  bs=4k
+  ioengine=libaio
+  iodepth=32
+  direct=1
+  sync=0
+  time_based=1
+  runtime=30
+  clocksource=gettimeofday
+  ramp_time=5
+
+  [job1]
+  rw=randread
+  filename=/dev/vdb
+  size=4096M
+  write_bw_log=fio
+  write_iops_log=fio
+  write_lat_log=fio
+  log_avg_msec=1000
+
+This benchmark was run on an raw image on LVM.  The disk was an SSD
+drive and -drive cache=none,aio=native was used.
+
+Tested-by: Pradeep Surisetty <psuriset@redhat.com>
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+Reviewed-by: Fam Zheng <famz@redhat.com>
+(cherry-picked from commit fc73548e444ae3239f6cef44a5200b5d2c3e85d1)
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ hw/block/virtio-blk.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/hw/block/virtio-blk.c b/hw/block/virtio-blk.c
+index 6dd7fed..c99aefd 100644
+--- a/hw/block/virtio-blk.c
++++ b/hw/block/virtio-blk.c
+@@ -604,6 +604,8 @@ static void virtio_blk_handle_output(VirtIODevice *vdev, VirtQueue *vq)
+         return;
+     }
+ 
++    blk_io_plug(s->blk);
++
+     while ((req = virtio_blk_get_request(s))) {
+         virtio_blk_handle_request(req, &mrb);
+     }
+@@ -611,6 +613,8 @@ static void virtio_blk_handle_output(VirtIODevice *vdev, VirtQueue *vq)
+     if (mrb.num_reqs) {
+         virtio_blk_submit_multireq(s->blk, &mrb);
+     }
++
++    blk_io_unplug(s->blk);
+ }
+ 
+ static void virtio_blk_dma_restart_bh(void *opaque)
+-- 
+1.8.3.1
+

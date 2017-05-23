@@ -1,0 +1,170 @@
+From 48c30dc809ca6c35cfff9537cdceef2b345cade0 Mon Sep 17 00:00:00 2001
+From: Stefan Hajnoczi <stefanha@redhat.com>
+Date: Tue, 6 Sep 2016 15:17:49 +0200
+Subject: [PATCH 1/3] memory: emulate ioeventfd
+
+RH-Author: Stefan Hajnoczi <stefanha@redhat.com>
+Message-id: <1473175070-10193-2-git-send-email-stefanha@redhat.com>
+Patchwork-id: 72254
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH 1/2] memory: emulate ioeventfd
+Bugzilla: 1374623
+RH-Acked-by: Michael S. Tsirkin <mst@redhat.com>
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+RH-Acked-by: Ladi Prosek <lprosek@redhat.com>
+
+From: Pavel Fedin <p.fedin@samsung.com>
+
+The ioeventfd mechanism is used by vhost, dataplane, and virtio-pci to
+turn guest MMIO/PIO writes into eventfd file descriptor events.  This
+allows arbitrary threads to be notified when the guest writes to a
+specific MMIO/PIO address.
+
+qtest and TCG do not support ioeventfd because memory writes are not
+checked against registered ioeventfds in QEMU.  This patch implements
+this in memory_region_dispatch_write() so qtest can use ioeventfd.
+
+Also this patch fixes vhost aborting on some misconfigured old kernels
+like 3.18.0 on ARM. It is possible to explicitly enable CONFIG_EVENTFD
+in expert settings, while MMIO binding support in KVM will still be
+missing.
+
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+Signed-off-by: Pavel Fedin <p.fedin@samsung.com>
+Message-Id: <006e01d12377$0b9c2d40$22d487c0$@samsung.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+(cherry picked from commit 8c56c1a592b5092d91da8d8943c17777d6462a6f)
+
+This commit is needed so that vhost-user-test keeps passing after the
+commit that follows.
+
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+
+Conflicts:
+  kvm-all.c
+
+    Upstream has 7bbda04c8d13d0a599b31ed1c10dc76a62f9d4dc ("kvm-all:
+    make KVM's memory listener more generic") which gives every KVMState
+    its own memory_listener field.  Downstream still uses a global
+    memory listener.  The backport of the above commit has
+    dependencies/conflicts so instead toggle eventfd callbacks for the
+    global memory listener.
+
+  memory.c
+
+    Context conflict in memory_region_add_eventfd(), unrelated to the
+    semantics of this patch.
+
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+---
+ kvm-all.c |  6 ++++++
+ memory.c  | 42 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 48 insertions(+)
+
+diff --git a/kvm-all.c b/kvm-all.c
+index 8c74e6d..c32350b 100644
+--- a/kvm-all.c
++++ b/kvm-all.c
+@@ -1655,6 +1655,12 @@ static int kvm_init(MachineState *ms)
+     }
+ 
+     kvm_state = s;
++
++    if (!kvm_eventfds_allowed) {
++        kvm_memory_listener.eventfd_add = NULL;
++        kvm_memory_listener.eventfd_del = NULL;
++    }
++
+     memory_listener_register(&kvm_memory_listener, &address_space_memory);
+     memory_listener_register(&kvm_io_listener, &address_space_io);
+ 
+diff --git a/memory.c b/memory.c
+index 85f353f..e190f35 100644
+--- a/memory.c
++++ b/memory.c
+@@ -18,12 +18,14 @@
+ #include "exec/ioport.h"
+ #include "qapi/visitor.h"
+ #include "qemu/bitops.h"
++#include "qemu/error-report.h"
+ #include "qom/object.h"
+ #include "trace.h"
+ #include <assert.h>
+ 
+ #include "exec/memory-internal.h"
+ #include "exec/ram_addr.h"
++#include "sysemu/kvm.h"
+ #include "sysemu/sysemu.h"
+ 
+ //#define DEBUG_UNASSIGNED
+@@ -1144,6 +1146,32 @@ MemTxResult memory_region_dispatch_read(MemoryRegion *mr,
+     return r;
+ }
+ 
++/* Return true if an eventfd was signalled */
++static bool memory_region_dispatch_write_eventfds(MemoryRegion *mr,
++                                                    hwaddr addr,
++                                                    uint64_t data,
++                                                    unsigned size,
++                                                    MemTxAttrs attrs)
++{
++    MemoryRegionIoeventfd ioeventfd = {
++        .addr = addrrange_make(int128_make64(addr), int128_make64(size)),
++        .data = data,
++    };
++    unsigned i;
++
++    for (i = 0; i < mr->ioeventfd_nb; i++) {
++        ioeventfd.match_data = mr->ioeventfds[i].match_data;
++        ioeventfd.e = mr->ioeventfds[i].e;
++
++        if (memory_region_ioeventfd_equal(ioeventfd, mr->ioeventfds[i])) {
++            event_notifier_set(ioeventfd.e);
++            return true;
++        }
++    }
++
++    return false;
++}
++
+ MemTxResult memory_region_dispatch_write(MemoryRegion *mr,
+                                          hwaddr addr,
+                                          uint64_t data,
+@@ -1157,6 +1185,11 @@ MemTxResult memory_region_dispatch_write(MemoryRegion *mr,
+ 
+     adjust_endianness(mr, &data, size);
+ 
++    if ((!kvm_eventfds_enabled()) &&
++        memory_region_dispatch_write_eventfds(mr, addr, data, size, attrs)) {
++        return MEMTX_OK;
++    }
++
+     if (mr->ops->write) {
+         return access_with_adjusted_size(addr, &data, size,
+                                          mr->ops->impl.min_access_size,
+@@ -1655,6 +1688,8 @@ void memory_region_clear_flush_coalesced(MemoryRegion *mr)
+     }
+ }
+ 
++static bool userspace_eventfd_warning;
++
+ void memory_region_add_eventfd(MemoryRegion *mr,
+                                hwaddr addr,
+                                unsigned size,
+@@ -1671,6 +1706,13 @@ void memory_region_add_eventfd(MemoryRegion *mr,
+     };
+     unsigned i;
+ 
++    if (kvm_enabled() && (!(kvm_eventfds_enabled() ||
++                            userspace_eventfd_warning))) {
++        userspace_eventfd_warning = true;
++        error_report("Using eventfd without MMIO binding in KVM. "
++                     "Suboptimal performance expected");
++    }
++
+     adjust_endianness(mr, &mrfd.data, size);
+     memory_region_transaction_begin();
+     for (i = 0; i < mr->ioeventfd_nb; ++i) {
+-- 
+1.8.3.1
+

@@ -1,0 +1,25 @@
+From d9e180b908238faa52f69b4deac769021b2b0f4f Mon Sep 17 00:00:00 2001
+From: Chilledheart <rwindz0@gmail.com>
+Date: Tue, 17 Jan 2017 15:21:14 +0800
+Subject: [PATCH 2/2] add default scsi timeout 45s
+
+---
+ libiscsi-1.18.0/lib/init.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/libiscsi-1.18.0/lib/init.c b/libiscsi-1.18.0/lib/init.c
+index 9941ceb..6eea59a 100644
+--- a/libiscsi-1.18.0/lib/init.c
++++ b/libiscsi-1.18.0/lib/init.c
+@@ -239,6 +239,8 @@ iscsi_create_context(const char *initiator_name)
+ 		iscsi->cache_allocations = 1;
+ 	}
+
++	iscsi->scsi_timeout = 45;
++
+ 	return iscsi;
+ }
+
+--
+2.9.3
+

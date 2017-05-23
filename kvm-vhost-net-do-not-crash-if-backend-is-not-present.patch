@@ -1,0 +1,59 @@
+From 1b648c5b7c15f83343910c60c2b86d379887f802 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 20 Jun 2016 09:06:52 +0200
+Subject: [PATCH 13/16] vhost-net: do not crash if backend is not present
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <1466413615-23069-14-git-send-email-marcandre.lureau@redhat.com>
+Patchwork-id: 70705
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH v2 13/16] vhost-net: do not crash if backend is not present
+Bugzilla: 1348593
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+RH-Acked-by: Victor Kaplansky <vkaplans@redhat.com>
+
+From: Marc-André Lureau <marcandre.lureau@redhat.com>
+
+Do not crash when backend is not present while enabling the ring. A
+following patch will save the enabled state so it can be restored once
+the backend is started.
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Tested-by: Yuanhan Liu <yuanhan.liu@linux.intel.com>
+Reviewed-by: Yuanhan Liu <yuanhan.liu@linux.intel.com>
+Reviewed-by: Victor Kaplansky <victork@redhat.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+
+(cherry picked from commit 72b65f922b7b925ed67847017dcd0539e49d925f)
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ hw/net/vhost_net.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/hw/net/vhost_net.c b/hw/net/vhost_net.c
+index de23cd6..0e5df52 100644
+--- a/hw/net/vhost_net.c
++++ b/hw/net/vhost_net.c
+@@ -438,8 +438,13 @@ VHostNetState *get_vhost_net(NetClientState *nc)
+ int vhost_set_vring_enable(NetClientState *nc, int enable)
+ {
+     VHostNetState *net = get_vhost_net(nc);
+-    const VhostOps *vhost_ops = net->dev.vhost_ops;
++    const VhostOps *vhost_ops;
++
++    if (!net) {
++        return 0;
++    }
+ 
++    vhost_ops = net->dev.vhost_ops;
+     if (vhost_ops->vhost_backend_set_vring_enable) {
+         return vhost_ops->vhost_backend_set_vring_enable(&net->dev, enable);
+     }
+-- 
+1.8.3.1
+

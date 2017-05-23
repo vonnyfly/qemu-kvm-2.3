@@ -1,0 +1,66 @@
+From 52470a3eb865fa94936e6f6dfcc63a50497eaa8f Mon Sep 17 00:00:00 2001
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Fri, 25 Mar 2016 15:55:24 +0100
+Subject: [PATCH] exec: Stop using memory after free (BZ#1315195)
+
+RH-Author: Paolo Bonzini <pbonzini@redhat.com>
+Message-id: <1458921324-5503-1-git-send-email-pbonzini@redhat.com>
+Patchwork-id: 69865
+O-Subject: [RHEL7.2.z qemu-kvm-rhev PATCH] exec: Stop using memory after free (BZ#1315195)
+Bugzilla: 1315195
+RH-Acked-by: Laszlo Ersek <lersek@redhat.com>
+RH-Acked-by: Stefan Hajnoczi <stefanha@redhat.com>
+RH-Acked-by: Laurent Vivier <lvivier@redhat.com>
+
+From: Don Slutz <don.slutz@gmail.com>
+
+Brew build: 10735129
+
+memory_region_unref(mr) can free memory.
+
+For example I got:
+
+Program received signal SIGSEGV, Segmentation fault.
+[Switching to Thread 0x7f43280d4700 (LWP 4462)]
+0x00007f43323283c0 in phys_section_destroy (mr=0x7f43259468b0)
+    at /home/don/xen/tools/qemu-xen-dir/exec.c:1023
+1023        if (mr->subpage) {
+(gdb) bt
+    at /home/don/xen/tools/qemu-xen-dir/exec.c:1023
+    at /home/don/xen/tools/qemu-xen-dir/exec.c:1034
+    at /home/don/xen/tools/qemu-xen-dir/exec.c:2205
+(gdb) p mr
+$1 = (MemoryRegion *) 0x7f43259468b0
+
+And this change prevents this.
+
+Signed-off-by: Don Slutz <Don.Slutz@Gmail.com>
+Message-Id: <1448921464-21845-1-git-send-email-Don.Slutz@Gmail.com>
+Cc: qemu-stable@nongnu.org
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+(cherry picked from commit 55b4e80b047300e1512df02887b7448ba3786b62)
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ exec.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/exec.c b/exec.c
+index a457b76..460710f 100644
+--- a/exec.c
++++ b/exec.c
+@@ -966,9 +966,11 @@ static uint16_t phys_section_add(PhysPageMap *map,
+ 
+ static void phys_section_destroy(MemoryRegion *mr)
+ {
++    bool have_sub_page = mr->subpage;
++
+     memory_region_unref(mr);
+ 
+-    if (mr->subpage) {
++    if (have_sub_page) {
+         subpage_t *subpage = container_of(mr, subpage_t, iomem);
+         object_unref(OBJECT(&subpage->iomem));
+         g_free(subpage);
+-- 
+1.8.3.1
+

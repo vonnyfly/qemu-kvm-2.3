@@ -1,0 +1,83 @@
+From 1eab1c9d4bd9dd2a19d6bd73c958fa644d99283d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 20 Jun 2016 09:06:45 +0200
+Subject: [PATCH 06/16] vhost-user-test: use unix port for migration
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <1466413615-23069-7-git-send-email-marcandre.lureau@redhat.com>
+Patchwork-id: 70698
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH v2 06/16] vhost-user-test: use unix port for migration
+Bugzilla: 1348593
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+RH-Acked-by: Victor Kaplansky <vkaplans@redhat.com>
+
+From: Marc-André Lureau <marcandre.lureau@redhat.com>
+
+TCP port 1234 may be used by another process concurrently. Instead use a
+temporary unix socket.
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+
+(cherry picked from commit a899b1ea2a6d6baa18f1c12da566aad35cb0d807)
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ tests/vhost-user-test.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/tests/vhost-user-test.c b/tests/vhost-user-test.c
+index 261f4b7..29205ed 100644
+--- a/tests/vhost-user-test.c
++++ b/tests/vhost-user-test.c
+@@ -123,6 +123,7 @@ static VhostUserMsg m __attribute__ ((unused));
+ 
+ typedef struct TestServer {
+     gchar *socket_path;
++    gchar *mig_path;
+     gchar *chr_name;
+     CharDriverState *chr;
+     int fds_num;
+@@ -364,6 +365,7 @@ static TestServer *test_server_new(const gchar *name)
+     gchar *chr_path;
+ 
+     server->socket_path = g_strdup_printf("%s/%s.sock", tmpfs, name);
++    server->mig_path = g_strdup_printf("%s/%s.mig", tmpfs, name);
+ 
+     chr_path = g_strdup_printf("unix:%s,server,nowait", server->socket_path);
+     server->chr_name = g_strdup_printf("chr-%s", name);
+@@ -405,6 +407,9 @@ static gboolean _test_server_free(TestServer *server)
+     unlink(server->socket_path);
+     g_free(server->socket_path);
+ 
++    unlink(server->mig_path);
++    g_free(server->mig_path);
++
+     g_free(server->chr_name);
+     g_free(server);
+ 
+@@ -512,7 +517,7 @@ static void test_migrate(void)
+ {
+     TestServer *s = test_server_new("src");
+     TestServer *dest = test_server_new("dest");
+-    const char *uri = "tcp:127.0.0.1:1234";
++    char *uri = g_strdup_printf("%s%s", "unix:", dest->mig_path);
+     QTestState *global = global_qtest, *from, *to;
+     GSource *source;
+     gchar *cmd;
+@@ -583,6 +588,7 @@ static void test_migrate(void)
+     test_server_free(dest);
+     qtest_quit(from);
+     test_server_free(s);
++    g_free(uri);
+ 
+     global_qtest = global;
+ }
+-- 
+1.8.3.1
+

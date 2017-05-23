@@ -1,0 +1,49 @@
+From 905a69bc02f65d7c2814d0c83883e1fc2733563b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Thu, 14 Jul 2016 20:57:10 +0200
+Subject: [PATCH 1/4] qemu-sockets: use qapi_free_SocketAddress in cleanup
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <20160714205713.2562-2-marcandre.lureau@redhat.com>
+Patchwork-id: 71184
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH 1/4] qemu-sockets: use qapi_free_SocketAddress in cleanup
+Bugzilla: 1354090
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+RH-Acked-by: Laurent Vivier <lvivier@redhat.com>
+
+From: Marc-André Lureau <marcandre.lureau@redhat.com>
+
+Commit 74b6ce43e3 uses the wrong free API for a SocketAddress, that
+may leak some linked data.
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-Id: <20160706164246.22116-1-marcandre.lureau@redhat.com>
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+
+(cherry picked from commit 73f40c1895980dc705b6b0594ace6580b3f68537)
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ util/qemu-sockets.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/util/qemu-sockets.c b/util/qemu-sockets.c
+index f7d0eee..ca3348c 100644
+--- a/util/qemu-sockets.c
++++ b/util/qemu-sockets.c
+@@ -995,7 +995,7 @@ void socket_listen_cleanup(int fd, Error **errp)
+         }
+     }
+ 
+-    g_free(addr);
++    qapi_free_SocketAddress(addr);
+ }
+ 
+ int socket_dgram(SocketAddress *remote, SocketAddress *local, Error **errp)
+-- 
+1.8.3.1
+

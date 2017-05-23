@@ -1,0 +1,102 @@
+From 234eee917a5df6f96c841137288e2f5e646103bb Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 4 Jul 2016 20:54:07 +0200
+Subject: [PATCH 4/5] socket: unlink unix socket on remove
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <20160704205408.26004-5-marcandre.lureau@redhat.com>
+Patchwork-id: 70935
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH v2 4/5] socket: unlink unix socket on remove
+Bugzilla: 1351892
+RH-Acked-by: Victor Kaplansky <vkaplans@redhat.com>
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+
+From: Marc-André Lureau <marcandre.lureau@redhat.com>
+
+qemu leaves unix socket files behind when removing a listening chardev
+or leaving. qemu could clean that up, even if doing so isn't race-free.
+
+Fixes:
+https://bugzilla.redhat.com/show_bug.cgi?id=1347077
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-Id: <1466105332-10285-4-git-send-email-marcandre.lureau@redhat.com>
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+
+(cherry picked from commit 74b6ce43e3aacbb101018407196fc963e2c39fea)
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+
+Conflicts:
+        io/channel-socket.c
+        tests/test-io-channel-socket.c
+        util/qemu-sockets.c
+
+Conflicts due to lack of QIOChannel.
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+---
+ include/qemu/sockets.h |  1 +
+ qemu-char.c            |  1 +
+ util/qemu-sockets.c    | 18 ++++++++++++++++++
+ 3 files changed, 20 insertions(+)
+
+diff --git a/include/qemu/sockets.h b/include/qemu/sockets.h
+index dd562f4..89fdbf6 100644
+--- a/include/qemu/sockets.h
++++ b/include/qemu/sockets.h
+@@ -83,6 +83,7 @@ SocketAddress *socket_parse(const char *str, Error **errp);
+ int socket_connect(SocketAddress *addr, Error **errp,
+                    NonBlockingConnectHandler *callback, void *opaque);
+ int socket_listen(SocketAddress *addr, Error **errp);
++void socket_listen_cleanup(int fd, Error **errp);
+ int socket_dgram(SocketAddress *remote, SocketAddress *local, Error **errp);
+ 
+ /* Old, ipv4 only bits.  Don't use for new code. */
+diff --git a/qemu-char.c b/qemu-char.c
+index 73065ac..5b44bee 100644
+--- a/qemu-char.c
++++ b/qemu-char.c
+@@ -3042,6 +3042,7 @@ static void tcp_chr_close(CharDriverState *chr)
+         if (s->listen_chan) {
+             g_io_channel_unref(s->listen_chan);
+         }
++        socket_listen_cleanup(s->listen_fd, NULL);
+         closesocket(s->listen_fd);
+     }
+     if (s->read_msgfds_num) {
+diff --git a/util/qemu-sockets.c b/util/qemu-sockets.c
+index ddc48cf..f7d0eee 100644
+--- a/util/qemu-sockets.c
++++ b/util/qemu-sockets.c
+@@ -980,6 +980,24 @@ int socket_listen(SocketAddress *addr, Error **errp)
+     return fd;
+ }
+ 
++void socket_listen_cleanup(int fd, Error **errp)
++{
++    SocketAddress *addr;
++
++    addr = socket_local_address(fd, errp);
++
++    if (addr->kind == SOCKET_ADDRESS_KIND_UNIX
++        && addr->q_unix->path) {
++        if (unlink(addr->q_unix->path) < 0 && errno != ENOENT) {
++            error_setg_errno(errp, errno,
++                             "Failed to unlink socket %s",
++                             addr->q_unix->path);
++        }
++    }
++
++    g_free(addr);
++}
++
+ int socket_dgram(SocketAddress *remote, SocketAddress *local, Error **errp)
+ {
+     QemuOpts *opts;
+-- 
+1.8.3.1
+

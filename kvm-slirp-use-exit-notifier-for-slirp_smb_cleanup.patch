@@ -1,0 +1,91 @@
+From 4b99cdc34a3ea110a44051214bd747fe2e215cd2 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Thu, 14 Jul 2016 20:57:12 +0200
+Subject: [PATCH 3/4] slirp: use exit notifier for slirp_smb_cleanup
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <20160714205713.2562-4-marcandre.lureau@redhat.com>
+Patchwork-id: 71186
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH 3/4] slirp: use exit notifier for slirp_smb_cleanup
+Bugzilla: 1354090
+RH-Acked-by: Miroslav Rezanina <mrezanin@redhat.com>
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+RH-Acked-by: Laurent Vivier <lvivier@redhat.com>
+
+From: Paolo Bonzini <pbonzini@redhat.com>
+
+We would like to move back net_cleanup() at the end of main function,
+like it used to be until f30dbae63a46f23116715dff8d130c, but minimum
+cleanup is needed regardless at exit() time for slirp's SMB
+functionality.  Use an exit notifier to call slirp_smb_cleanup.
+If net_cleanup() is called first, then remove the exit notifier as it
+will become a dangling pointer otherwise.
+
+Reviewed-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Reviewed-by: Jason Wang <jasowang@redhat.com>
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+
+(cherry picked from commit f6c2e66ae8c8a03d3044dc9054aa7c16e7f817ee)
+
+Simple conflict in headers.
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ net/slirp.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/net/slirp.c b/net/slirp.c
+index 9bbed74..2ba59e3 100644
+--- a/net/slirp.c
++++ b/net/slirp.c
+@@ -36,6 +36,7 @@
+ #include "qemu/sockets.h"
+ #include "slirp/libslirp.h"
+ #include "sysemu/char.h"
++#include "sysemu/sysemu.h"
+ 
+ static int get_str_sep(char *buf, int buf_size, const char **pp, int sep)
+ {
+@@ -73,6 +74,7 @@ typedef struct SlirpState {
+     NetClientState nc;
+     QTAILQ_ENTRY(SlirpState) entry;
+     Slirp *slirp;
++    Notifier exit_notifier;
+ #ifndef _WIN32
+     char smb_dir[128];
+ #endif
+@@ -115,11 +117,18 @@ static ssize_t net_slirp_receive(NetClientState *nc, const uint8_t *buf, size_t
+     return size;
+ }
+ 
++static void slirp_smb_exit(Notifier *n, void *data)
++{
++    SlirpState *s = container_of(n, SlirpState, exit_notifier);
++    slirp_smb_cleanup(s);
++}
++
+ static void net_slirp_cleanup(NetClientState *nc)
+ {
+     SlirpState *s = DO_UPCAST(SlirpState, nc, nc);
+ 
+     slirp_cleanup(s->slirp);
++    qemu_remove_exit_notifier(&s->exit_notifier);
+     slirp_smb_cleanup(s);
+     QTAILQ_REMOVE(&slirp_stacks, s, entry);
+ }
+@@ -267,6 +276,8 @@ static int net_slirp_init(NetClientState *peer, const char *model,
+     }
+ #endif
+ 
++    s->exit_notifier.notify = slirp_smb_exit;
++    qemu_add_exit_notifier(&s->exit_notifier);
+     return 0;
+ 
+ error:
+-- 
+1.8.3.1
+

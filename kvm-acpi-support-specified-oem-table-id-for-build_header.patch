@@ -1,0 +1,241 @@
+From baa4a8b9e3c9cfe8005ddc8f1c701d11d8dfb3f3 Mon Sep 17 00:00:00 2001
+From: Laszlo Ersek <lersek@redhat.com>
+Date: Thu, 29 Sep 2016 11:35:14 +0200
+Subject: [PATCH 1/6] acpi: support specified oem table id for build_header
+
+RH-Author: Laszlo Ersek <lersek@redhat.com>
+Message-id: <20160929113518.25306-2-lersek@redhat.com>
+Patchwork-id: 72441
+O-Subject: [RHEL-7.2.z qemu-kvm-rhev PATCH 1/5] acpi: support specified oem table id for build_header
+Bugzilla: 1380310
+RH-Acked-by: Thomas Huth <thuth@redhat.com>
+RH-Acked-by: Igor Mammedov <imammedo@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+
+From: Xiao Guangrong <guangrong.xiao@linux.intel.com>
+
+Let build_header() support specified OEM table id so that we can build
+multiple SSDT later
+
+If the oem table id is not specified (aka, NULL), we use the default id
+instead as the previous behavior
+
+Reviewed-by: Stefan Hajnoczi <stefanha@redhat.com>
+Signed-off-by: Xiao Guangrong <guangrong.xiao@linux.intel.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+(cherry picked from commit 8870ca0e94f2524644812dd759863c0851ffb870)
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+
+Conflicts:
+	hw/i386/acpi-build.c
+
+RHEL-7 notes on the conflict: upstream added TPM2 support in 5cb18b3d7bff2
+("TPM2 ACPI table support"), introducing another build_header() call; we
+don't have it.
+
+Signed-off-by: Laszlo Ersek <lersek@redhat.com>
+---
+ hw/acpi/aml-build.c         | 15 +++++++++++----
+ hw/arm/virt-acpi-build.c    | 13 +++++++------
+ hw/i386/acpi-build.c        | 18 +++++++++---------
+ include/hw/acpi/aml-build.h |  3 ++-
+ 4 files changed, 29 insertions(+), 20 deletions(-)
+
+diff --git a/hw/acpi/aml-build.c b/hw/acpi/aml-build.c
+index 0d4b324..c72a295 100644
+--- a/hw/acpi/aml-build.c
++++ b/hw/acpi/aml-build.c
+@@ -1137,14 +1137,21 @@ Aml *aml_unicode(const char *str)
+ 
+ void
+ build_header(GArray *linker, GArray *table_data,
+-             AcpiTableHeader *h, const char *sig, int len, uint8_t rev)
++             AcpiTableHeader *h, const char *sig, int len, uint8_t rev,
++             const char *oem_table_id)
+ {
+     memcpy(&h->signature, sig, 4);
+     h->length = cpu_to_le32(len);
+     h->revision = rev;
+     memcpy(h->oem_id, ACPI_BUILD_APPNAME6, 6);
+-    memcpy(h->oem_table_id, ACPI_BUILD_APPNAME4, 4);
+-    memcpy(h->oem_table_id + 4, sig, 4);
++
++    if (oem_table_id) {
++        strncpy((char *)h->oem_table_id, oem_table_id, sizeof(h->oem_table_id));
++    } else {
++        memcpy(h->oem_table_id, ACPI_BUILD_APPNAME4, 4);
++        memcpy(h->oem_table_id + 4, sig, 4);
++    }
++
+     h->oem_revision = cpu_to_le32(1);
+     memcpy(h->asl_compiler_id, ACPI_BUILD_APPNAME4, 4);
+     h->asl_compiler_revision = cpu_to_le32(1);
+@@ -1213,5 +1220,5 @@ build_rsdt(GArray *table_data, GArray *linker, GArray *table_offsets)
+                                        sizeof(uint32_t));
+     }
+     build_header(linker, table_data,
+-                 (void *)rsdt, "RSDT", rsdt_len, 1);
++                 (void *)rsdt, "RSDT", rsdt_len, 1, NULL);
+ }
+diff --git a/hw/arm/virt-acpi-build.c b/hw/arm/virt-acpi-build.c
+index f365140..d850cf8 100644
+--- a/hw/arm/virt-acpi-build.c
++++ b/hw/arm/virt-acpi-build.c
+@@ -368,7 +368,8 @@ build_spcr(GArray *table_data, GArray *linker, VirtGuestInfo *guest_info)
+     spcr->pci_device_id = 0xffff;  /* PCI Device ID: not a PCI device */
+     spcr->pci_vendor_id = 0xffff;  /* PCI Vendor ID: not a PCI device */
+ 
+-    build_header(linker, table_data, (void *)spcr, "SPCR", sizeof(*spcr), 2);
++    build_header(linker, table_data, (void *)spcr, "SPCR", sizeof(*spcr), 2,
++                 NULL);
+ }
+ 
+ static void
+@@ -387,7 +388,7 @@ build_mcfg(GArray *table_data, GArray *linker, VirtGuestInfo *guest_info)
+     mcfg->allocation[0].end_bus_number = (memmap[VIRT_PCIE_ECAM].size
+                                           / PCIE_MMCFG_SIZE_MIN) - 1;
+ 
+-    build_header(linker, table_data, (void *)mcfg, "MCFG", len, 1);
++    build_header(linker, table_data, (void *)mcfg, "MCFG", len, 1, NULL);
+ }
+ 
+ /* GTDT */
+@@ -413,7 +414,7 @@ build_gtdt(GArray *table_data, GArray *linker)
+ 
+     build_header(linker, table_data,
+                  (void *)(table_data->data + gtdt_start), "GTDT",
+-                 table_data->len - gtdt_start, 2);
++                 table_data->len - gtdt_start, 2, NULL);
+ }
+ 
+ /* MADT */
+@@ -461,7 +462,7 @@ build_madt(GArray *table_data, GArray *linker, VirtGuestInfo *guest_info,
+ 
+     build_header(linker, table_data,
+                  (void *)(table_data->data + madt_start), "APIC",
+-                 table_data->len - madt_start, 3);
++                 table_data->len - madt_start, 3, NULL);
+ }
+ 
+ /* FADT */
+@@ -486,7 +487,7 @@ build_fadt(GArray *table_data, GArray *linker, unsigned dsdt)
+                                    sizeof fadt->dsdt);
+ 
+     build_header(linker, table_data,
+-                 (void *)fadt, "FACP", sizeof(*fadt), 5);
++                 (void *)fadt, "FACP", sizeof(*fadt), 5, NULL);
+ }
+ 
+ /* DSDT */
+@@ -518,7 +519,7 @@ build_dsdt(GArray *table_data, GArray *linker, VirtGuestInfo *guest_info)
+     g_array_append_vals(table_data, dsdt->buf->data, dsdt->buf->len);
+     build_header(linker, table_data,
+         (void *)(table_data->data + table_data->len - dsdt->buf->len),
+-        "DSDT", dsdt->buf->len, 2);
++        "DSDT", dsdt->buf->len, 2, NULL);
+     free_aml_allocator();
+ }
+ 
+diff --git a/hw/i386/acpi-build.c b/hw/i386/acpi-build.c
+index 1ee2446..0ed250b 100644
+--- a/hw/i386/acpi-build.c
++++ b/hw/i386/acpi-build.c
+@@ -359,7 +359,7 @@ build_fadt(GArray *table_data, GArray *linker, AcpiPmInfo *pm,
+     fadt_setup(fadt, pm);
+ 
+     build_header(linker, table_data,
+-                 (void *)fadt, "FACP", sizeof(*fadt), 1);
++                 (void *)fadt, "FACP", sizeof(*fadt), 1, NULL);
+ }
+ 
+ static void
+@@ -429,7 +429,7 @@ build_madt(GArray *table_data, GArray *linker, AcpiCpuInfo *cpu,
+ 
+     build_header(linker, table_data,
+                  (void *)(table_data->data + madt_start), "APIC",
+-                 table_data->len - madt_start, 1);
++                 table_data->len - madt_start, 1, NULL);
+ }
+ 
+ #include "hw/i386/ssdt-tpm.hex"
+@@ -1335,7 +1335,7 @@ build_ssdt(GArray *table_data, GArray *linker,
+     g_array_append_vals(table_data, ssdt->buf->data, ssdt->buf->len);
+     build_header(linker, table_data,
+         (void *)(table_data->data + table_data->len - ssdt->buf->len),
+-        "SSDT", ssdt->buf->len, 1);
++        "SSDT", ssdt->buf->len, 1, NULL);
+     free_aml_allocator();
+ }
+ 
+@@ -1351,7 +1351,7 @@ build_hpet(GArray *table_data, GArray *linker)
+     hpet->timer_block_id = cpu_to_le32(0x8086a201);
+     hpet->addr.address = cpu_to_le64(HPET_BASE);
+     build_header(linker, table_data,
+-                 (void *)hpet, "HPET", sizeof(*hpet), 1);
++                 (void *)hpet, "HPET", sizeof(*hpet), 1, NULL);
+ }
+ 
+ static void
+@@ -1374,7 +1374,7 @@ build_tpm_tcpa(GArray *table_data, GArray *linker, GArray *tcpalog)
+                                    sizeof(tcpa->log_area_start_address));
+ 
+     build_header(linker, table_data,
+-                 (void *)tcpa, "TCPA", sizeof(*tcpa), 2);
++                 (void *)tcpa, "TCPA", sizeof(*tcpa), 2, NULL);
+ 
+     acpi_data_push(tcpalog, TPM_LOG_AREA_MINIMUM_SIZE);
+ }
+@@ -1499,7 +1499,7 @@ build_srat(GArray *table_data, GArray *linker, PcGuestInfo *guest_info)
+     build_header(linker, table_data,
+                  (void *)(table_data->data + srat_start),
+                  "SRAT",
+-                 table_data->len - srat_start, 1);
++                 table_data->len - srat_start, 1, NULL);
+ }
+ 
+ static void
+@@ -1528,7 +1528,7 @@ build_mcfg_q35(GArray *table_data, GArray *linker, AcpiMcfgInfo *info)
+     } else {
+         sig = "MCFG";
+     }
+-    build_header(linker, table_data, (void *)mcfg, sig, len, 1);
++    build_header(linker, table_data, (void *)mcfg, sig, len, 1, NULL);
+ }
+ 
+ static void
+@@ -1552,7 +1552,7 @@ build_dmar_q35(GArray *table_data, GArray *linker)
+     drhd->address = cpu_to_le64(Q35_HOST_BRIDGE_IOMMU_ADDR);
+ 
+     build_header(linker, table_data, (void *)(table_data->data + dmar_start),
+-                 "DMAR", table_data->len - dmar_start, 1);
++                 "DMAR", table_data->len - dmar_start, 1, NULL);
+ }
+ 
+ static void
+@@ -1567,7 +1567,7 @@ build_dsdt(GArray *table_data, GArray *linker, AcpiMiscInfo *misc)
+ 
+     memset(dsdt, 0, sizeof *dsdt);
+     build_header(linker, table_data, dsdt, "DSDT",
+-                 misc->dsdt_size, 1);
++                 misc->dsdt_size, 1, NULL);
+ }
+ 
+ static GArray *
+diff --git a/include/hw/acpi/aml-build.h b/include/hw/acpi/aml-build.h
+index e3afa13..7e123cb 100644
+--- a/include/hw/acpi/aml-build.h
++++ b/include/hw/acpi/aml-build.h
+@@ -278,7 +278,8 @@ Aml *aml_unicode(const char *str);
+ 
+ void
+ build_header(GArray *linker, GArray *table_data,
+-             AcpiTableHeader *h, const char *sig, int len, uint8_t rev);
++             AcpiTableHeader *h, const char *sig, int len, uint8_t rev,
++             const char *oem_table_id);
+ void *acpi_data_push(GArray *table_data, unsigned size);
+ unsigned acpi_data_len(GArray *table);
+ void acpi_add_table(GArray *table_offsets, GArray *table_data);
+-- 
+1.8.3.1
+

@@ -1,0 +1,231 @@
+From 0b31296a03398790ef1ba74499f7806d06309116 Mon Sep 17 00:00:00 2001
+From: Jeffrey Cody <jcody@redhat.com>
+Date: Mon, 18 Apr 2016 20:16:59 +0200
+Subject: [PATCH 1/5] blockjob: Allow nested pause
+
+RH-Author: Jeffrey Cody <jcody@redhat.com>
+Message-id: <ef12752268d2008ce7ad8beac82d75f6cab1fc37.1461009743.git.jcody@redhat.com>
+Patchwork-id: 70206
+O-Subject: [RHEV7.2.z qemu-kvm-rhev 1/4] blockjob: Allow nested pause
+Bugzilla: 1329543
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+RH-Acked-by: Stefan Hajnoczi <stefanha@redhat.com>
+RH-Acked-by: Fam Zheng <famz@redhat.com>
+
+From: Fam Zheng <famz@redhat.com>
+
+This patch changes block_job_pause to increase the pause counter and
+block_job_resume to decrease it.
+
+The counter will allow calling block_job_pause/block_job_resume
+unconditionally on a job when we need to suspend the IO temporarily.
+
+>From now on, each block_job_resume must be paired with a block_job_pause
+to keep the counter balanced.
+
+The user pause from QMP or HMP will only trigger block_job_pause once
+until it's resumed, this is achieved by adding a user_paused flag in
+BlockJob.
+
+One occurrence of block_job_resume in mirror_complete is replaced with
+block_job_enter which does what is necessary.
+
+In block_job_cancel, the cancel flag is good enough to instruct
+coroutines to quit loop, so use block_job_enter to replace the unpaired
+block_job_resume.
+
+Upon block job IO error, user is notified about the entering to the
+pause state, so this pause belongs to user pause, set the flag
+accordingly and expect a matching QMP resume.
+
+[Extended doc comments as suggested by Paolo Bonzini
+<pbonzini@redhat.com>.
+--Stefan]
+
+Signed-off-by: Fam Zheng <famz@redhat.com>
+Reviewed-by: Stefan Hajnoczi <stefanha@redhat.com>
+Reviewed-by: Paolo Bonzini <pbonzini@redhat.com>
+Reviewed-by: Alberto Garcia <berto@igalia.com>
+Message-id: 1428069921-2957-2-git-send-email-famz@redhat.com
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+Signed-off-by: Kevin Wolf <kwolf@redhat.com>
+(cherry picked from commit 751ebd76e654bd1e65da08ecf694325282b4cfcc)
+Signed-off-by: Jeff Cody <jcody@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ block/mirror.c           |  2 +-
+ blockdev.c               |  8 +++++---
+ blockjob.c               | 23 +++++++++++++++++------
+ include/block/blockjob.h | 22 ++++++++++++++++++----
+ 4 files changed, 41 insertions(+), 14 deletions(-)
+
+diff --git a/block/mirror.c b/block/mirror.c
+index 9729877..f9ac66f 100644
+--- a/block/mirror.c
++++ b/block/mirror.c
+@@ -671,7 +671,7 @@ static void mirror_complete(BlockJob *job, Error **errp)
+     }
+ 
+     s->should_complete = true;
+-    block_job_resume(job);
++    block_job_enter(&s->common);
+ }
+ 
+ static const BlockJobDriver mirror_job_driver = {
+diff --git a/blockdev.c b/blockdev.c
+index 4f81cda..5dc4186 100644
+--- a/blockdev.c
++++ b/blockdev.c
+@@ -2704,7 +2704,7 @@ void qmp_block_job_cancel(const char *device,
+         force = false;
+     }
+ 
+-    if (job->paused && !force) {
++    if (job->user_paused && !force) {
+         error_setg(errp, "The block job for device '%s' is currently paused",
+                    device);
+         goto out;
+@@ -2721,10 +2721,11 @@ void qmp_block_job_pause(const char *device, Error **errp)
+     AioContext *aio_context;
+     BlockJob *job = find_block_job(device, &aio_context, errp);
+ 
+-    if (!job) {
++    if (!job || job->user_paused) {
+         return;
+     }
+ 
++    job->user_paused = true;
+     trace_qmp_block_job_pause(job);
+     block_job_pause(job);
+     aio_context_release(aio_context);
+@@ -2735,10 +2736,11 @@ void qmp_block_job_resume(const char *device, Error **errp)
+     AioContext *aio_context;
+     BlockJob *job = find_block_job(device, &aio_context, errp);
+ 
+-    if (!job) {
++    if (!job || !job->user_paused) {
+         return;
+     }
+ 
++    job->user_paused = false;
+     trace_qmp_block_job_resume(job);
+     block_job_resume(job);
+     aio_context_release(aio_context);
+diff --git a/blockjob.c b/blockjob.c
+index c5cef0f..f4dcf2e 100644
+--- a/blockjob.c
++++ b/blockjob.c
+@@ -107,7 +107,7 @@ void block_job_set_speed(BlockJob *job, int64_t speed, Error **errp)
+ 
+ void block_job_complete(BlockJob *job, Error **errp)
+ {
+-    if (job->paused || job->cancelled || !job->driver->complete) {
++    if (job->pause_count || job->cancelled || !job->driver->complete) {
+         error_set(errp, QERR_BLOCK_JOB_NOT_READY,
+                   bdrv_get_device_name(job->bs));
+         return;
+@@ -118,17 +118,26 @@ void block_job_complete(BlockJob *job, Error **errp)
+ 
+ void block_job_pause(BlockJob *job)
+ {
+-    job->paused = true;
++    job->pause_count++;
+ }
+ 
+ bool block_job_is_paused(BlockJob *job)
+ {
+-    return job->paused;
++    return job->pause_count > 0;
+ }
+ 
+ void block_job_resume(BlockJob *job)
+ {
+-    job->paused = false;
++    assert(job->pause_count > 0);
++    job->pause_count--;
++    if (job->pause_count) {
++        return;
++    }
++    block_job_enter(job);
++}
++
++void block_job_enter(BlockJob *job)
++{
+     block_job_iostatus_reset(job);
+     if (job->co && !job->busy) {
+         qemu_coroutine_enter(job->co, NULL);
+@@ -138,7 +147,7 @@ void block_job_resume(BlockJob *job)
+ void block_job_cancel(BlockJob *job)
+ {
+     job->cancelled = true;
+-    block_job_resume(job);
++    block_job_enter(job);
+ }
+ 
+ bool block_job_is_cancelled(BlockJob *job)
+@@ -258,7 +267,7 @@ BlockJobInfo *block_job_query(BlockJob *job)
+     info->device    = g_strdup(bdrv_get_device_name(job->bs));
+     info->len       = job->len;
+     info->busy      = job->busy;
+-    info->paused    = job->paused;
++    info->paused    = job->pause_count > 0;
+     info->offset    = job->offset;
+     info->speed     = job->speed;
+     info->io_status = job->iostatus;
+@@ -335,6 +344,8 @@ BlockErrorAction block_job_error_action(BlockJob *job, BlockDriverState *bs,
+                                     IO_OPERATION_TYPE_WRITE,
+                                     action, &error_abort);
+     if (action == BLOCK_ERROR_ACTION_STOP) {
++        /* make the pause user visible, which will be resumed from QMP. */
++        job->user_paused = true;
+         block_job_pause(job);
+         block_job_iostatus_set_err(job, error);
+         if (bs != job->bs) {
+diff --git a/include/block/blockjob.h b/include/block/blockjob.h
+index b6d4ebb..57d8ef1 100644
+--- a/include/block/blockjob.h
++++ b/include/block/blockjob.h
+@@ -79,10 +79,16 @@ struct BlockJob {
+     bool cancelled;
+ 
+     /**
+-     * Set to true if the job is either paused, or will pause itself
+-     * as soon as possible (if busy == true).
++     * Counter for pause request. If non-zero, the block job is either paused,
++     * or if busy == true will pause itself as soon as possible.
+      */
+-    bool paused;
++    int pause_count;
++
++    /**
++     * Set to true if the job is paused by user.  Can be unpaused with the
++     * block-job-resume QMP command.
++     */
++    bool user_paused;
+ 
+     /**
+      * Set to false by the job while it is in a quiescent state, where
+@@ -225,11 +231,19 @@ void block_job_pause(BlockJob *job);
+  * block_job_resume:
+  * @job: The job to be resumed.
+  *
+- * Resume the specified job.
++ * Resume the specified job.  Must be paired with a preceding block_job_pause.
+  */
+ void block_job_resume(BlockJob *job);
+ 
+ /**
++ * block_job_enter:
++ * @job: The job to enter.
++ *
++ * Continue the specified job by entering the coroutine.
++ */
++void block_job_enter(BlockJob *job);
++
++/**
+  * block_job_event_cancelled:
+  * @job: The job whose information is requested.
+  *
+-- 
+1.8.3.1
+

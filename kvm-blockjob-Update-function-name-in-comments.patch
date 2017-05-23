@@ -1,0 +1,60 @@
+From 385d4a36b31a084249f7501fec4ec33499d216e7 Mon Sep 17 00:00:00 2001
+From: Jeffrey Cody <jcody@redhat.com>
+Date: Mon, 18 Apr 2016 20:17:02 +0200
+Subject: [PATCH 4/5] blockjob: Update function name in comments
+
+RH-Author: Jeffrey Cody <jcody@redhat.com>
+Message-id: <b2ae761fdcd86dc9c11f57fbc557e7aa135427aa.1461009743.git.jcody@redhat.com>
+Patchwork-id: 70209
+O-Subject: [RHEV7.2.z qemu-kvm-rhev 4/4] blockjob: Update function name in comments
+Bugzilla: 1329543
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+RH-Acked-by: Stefan Hajnoczi <stefanha@redhat.com>
+RH-Acked-by: Fam Zheng <famz@redhat.com>
+
+From: Fam Zheng <famz@redhat.com>
+
+Signed-off-by: Fam Zheng <famz@redhat.com>
+Reviewed-by: Stefan Hajnoczi <stefanha@redhat.com>
+Reviewed-by: Paolo Bonzini <pbonzini@redhat.com>
+Reviewed-by: Alberto Garcia <berto@igalia.com>
+Message-id: 1428069921-2957-5-git-send-email-famz@redhat.com
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+Signed-off-by: Kevin Wolf <kwolf@redhat.com>
+(cherry picked from commit a7282330c01364ef00260749bc6a37c7f16ec047)
+Signed-off-by: Jeff Cody <jcody@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ block/backup.c | 2 +-
+ block/mirror.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/block/backup.c b/block/backup.c
+index 1c535b1..3312476 100644
+--- a/block/backup.c
++++ b/block/backup.c
+@@ -287,7 +287,7 @@ static void coroutine_fn backup_run(void *opaque)
+                 break;
+             }
+ 
+-            /* we need to yield so that qemu_aio_flush() returns.
++            /* we need to yield so that bdrv_drain_all() returns.
+              * (without, VM does not reboot)
+              */
+             if (job->common.speed) {
+diff --git a/block/mirror.c b/block/mirror.c
+index f9ac66f..3612ee8 100644
+--- a/block/mirror.c
++++ b/block/mirror.c
+@@ -510,7 +510,7 @@ static void coroutine_fn mirror_run(void *opaque)
+                         (cnt + s->sectors_in_flight) * BDRV_SECTOR_SIZE;
+ 
+         /* Note that even when no rate limit is applied we need to yield
+-         * periodically with no pending I/O so that qemu_aio_flush() returns.
++         * periodically with no pending I/O so that bdrv_drain_all() returns.
+          * We do so every SLICE_TIME nanoseconds, or when there is an error,
+          * or when the source is clean, whichever comes first.
+          */
+-- 
+1.8.3.1
+

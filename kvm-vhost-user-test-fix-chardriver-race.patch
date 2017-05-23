@@ -1,0 +1,117 @@
+From bc56e6c99b25f0e92683de7c8b7997c3d291d32b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 20 Jun 2016 09:06:44 +0200
+Subject: [PATCH 05/16] vhost-user-test: fix chardriver race
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <1466413615-23069-6-git-send-email-marcandre.lureau@redhat.com>
+Patchwork-id: 70697
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH v2 05/16] vhost-user-test: fix chardriver race
+Bugzilla: 1348593
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+RH-Acked-by: Victor Kaplansky <vkaplans@redhat.com>
+
+From: Marc-André Lureau <marcandre.lureau@redhat.com>
+
+vhost-user-tests uses a helper thread to dispatch the vhost-user servers
+sources. However the CharDriverState is not thread-safe. Therefore, when
+it's given to the thread, it shouldn't be manipulated concurrently.
+
+We dispatch cleaning the server in an idle source. By the end of the
+test, we ensure not to leave anything behind by joining the thread and
+finishing the sources dispatch.
+
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+
+(cherry picked from commit 9732baf67850dac57dfc7dc8980bf408889a8973)
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ tests/vhost-user-test.c | 26 +++++++++++++++++++++-----
+ 1 file changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/tests/vhost-user-test.c b/tests/vhost-user-test.c
+index e4c36af..261f4b7 100644
+--- a/tests/vhost-user-test.c
++++ b/tests/vhost-user-test.c
+@@ -216,8 +216,7 @@ static void read_guest_mem(TestServer *s)
+ 
+ static void *thread_function(void *data)
+ {
+-    GMainLoop *loop;
+-    loop = g_main_loop_new(NULL, FALSE);
++    GMainLoop *loop = data;
+     g_main_loop_run(loop);
+     return NULL;
+ }
+@@ -389,7 +388,7 @@ static TestServer *test_server_new(const gchar *name)
+     g_strdup_printf(QEMU_CMD extra, (mem), (mem), (root), (s)->chr_name,       \
+                     (s)->socket_path, (s)->chr_name, ##__VA_ARGS__)
+ 
+-static void test_server_free(TestServer *server)
++static gboolean _test_server_free(TestServer *server)
+ {
+     int i;
+ 
+@@ -406,9 +405,15 @@ static void test_server_free(TestServer *server)
+     unlink(server->socket_path);
+     g_free(server->socket_path);
+ 
+-
+     g_free(server->chr_name);
+     g_free(server);
++
++    return FALSE;
++}
++
++static void test_server_free(TestServer *server)
++{
++    g_idle_add((GSourceFunc)_test_server_free, server);
+ }
+ 
+ static void wait_for_log_fd(TestServer *s)
+@@ -590,6 +595,8 @@ int main(int argc, char **argv)
+     char *qemu_cmd = NULL;
+     int ret;
+     char template[] = "/tmp/vhost-test-XXXXXX";
++    GMainLoop *loop;
++    GThread *thread;
+ 
+     g_test_init(&argc, &argv, NULL);
+ 
+@@ -612,8 +619,9 @@ int main(int argc, char **argv)
+ 
+     server = test_server_new("test");
+ 
++    loop = g_main_loop_new(NULL, FALSE);
+     /* run the main loop thread so the chardev may operate */
+-    g_thread_new(NULL, thread_function, NULL);
++    thread = g_thread_new(NULL, thread_function, loop);
+ 
+     qemu_cmd = GET_QEMU_CMD(server);
+ 
+@@ -632,6 +640,14 @@ int main(int argc, char **argv)
+     /* cleanup */
+     test_server_free(server);
+ 
++    /* finish the helper thread and dispatch pending sources */
++    g_main_loop_quit(loop);
++    g_thread_join(thread);
++    while (g_main_context_pending(NULL)) {
++        g_main_context_iteration (NULL, TRUE);
++    }
++    g_main_loop_unref(loop);
++
+     ret = rmdir(tmpfs);
+     if (ret != 0) {
+         g_test_message("unable to rmdir: path (%s): %s\n",
+-- 
+1.8.3.1
+

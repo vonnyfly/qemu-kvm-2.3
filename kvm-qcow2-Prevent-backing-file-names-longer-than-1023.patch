@@ -1,0 +1,46 @@
+From 84d60ba73af642642c50e35a2559af25051e6d1e Mon Sep 17 00:00:00 2001
+From: Max Reitz <mreitz@redhat.com>
+Date: Fri, 27 May 2016 10:59:07 +0200
+Subject: [PATCH] qcow2: Prevent backing file names longer than 1023
+
+RH-Author: Max Reitz <mreitz@redhat.com>
+Message-id: <1464346747-27992-2-git-send-email-mreitz@redhat.com>
+Patchwork-id: 70494
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH 1/1] qcow2: Prevent backing file names longer than 1023
+Bugzilla: 1340045
+RH-Acked-by: Fam Zheng <famz@redhat.com>
+RH-Acked-by: Kevin Wolf <kwolf@redhat.com>
+RH-Acked-by: John Snow <jsnow@redhat.com>
+
+We reject backing file names with a length of more than 1023 characters
+when opening a qcow2 file, so we should not produce such files
+ourselves.
+
+Cc: qemu-stable@nongnu.org
+Signed-off-by: Max Reitz <mreitz@redhat.com>
+Signed-off-by: Kevin Wolf <kwolf@redhat.com>
+(cherry picked from commit 4e876bcf2bdb3a7353df92d19bfec0afd1650bc4)
+Signed-off-by: Max Reitz <mreitz@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ block/qcow2.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/block/qcow2.c b/block/qcow2.c
+index cab8450..c3646a6 100644
+--- a/block/qcow2.c
++++ b/block/qcow2.c
+@@ -1725,6 +1725,10 @@ static int qcow2_change_backing_file(BlockDriverState *bs,
+ {
+     BDRVQcowState *s = bs->opaque;
+ 
++    if (backing_file && strlen(backing_file) > 1023) {
++        return -EINVAL;
++    }
++
+     pstrcpy(bs->backing_file, sizeof(bs->backing_file), backing_file ?: "");
+     pstrcpy(bs->backing_format, sizeof(bs->backing_format), backing_fmt ?: "");
+ 
+-- 
+1.8.3.1
+

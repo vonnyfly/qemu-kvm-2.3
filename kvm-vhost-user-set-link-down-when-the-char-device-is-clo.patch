@@ -1,0 +1,48 @@
+From 32fdf49998126708f03ce7cdeb923f712c3ac220 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 20 Jun 2016 09:06:40 +0200
+Subject: [PATCH 01/16] vhost-user: set link down when the char device is
+ closed
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <1466413615-23069-2-git-send-email-marcandre.lureau@redhat.com>
+Patchwork-id: 70693
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH v2 01/16] vhost-user: set link down when the char device is closed
+Bugzilla: 1348593
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+RH-Acked-by: Victor Kaplansky <vkaplans@redhat.com>
+
+From: Wen Congyang <wency@cn.fujitsu.com>
+
+Signed-off-by: Wen Congyang <wency@cn.fujitsu.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+Reviewed-by: Yuanhan Liu <yuanhan.liu@linux.intel.com>
+
+(cherry picked from commit d39c87d70763f2755d1d7a719817b06f0281fb01)
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ net/vhost-user.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/vhost-user.c b/net/vhost-user.c
+index d7d3858..4086ced 100644
+--- a/net/vhost-user.c
++++ b/net/vhost-user.c
+@@ -188,7 +188,7 @@ static void net_vhost_user_event(void *opaque, int event)
+         qmp_set_link(name, true, &err);
+         break;
+     case CHR_EVENT_CLOSED:
+-        qmp_set_link(name, true, &err);
++        qmp_set_link(name, false, &err);
+         vhost_user_stop(queues, ncs);
+         break;
+     }
+-- 
+1.8.3.1
+

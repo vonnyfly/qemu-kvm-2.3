@@ -1,0 +1,74 @@
+From b0f77772fe8e0c17e42658cd655614d822d162f7 Mon Sep 17 00:00:00 2001
+From: Jeffrey Cody <jcody@redhat.com>
+Date: Mon, 18 Apr 2016 20:17:00 +0200
+Subject: [PATCH 2/5] block: Pause block jobs in bdrv_drain_all
+
+RH-Author: Jeffrey Cody <jcody@redhat.com>
+Message-id: <65033bc29c344fb8dd0fb7aa859f0a5be405d982.1461009743.git.jcody@redhat.com>
+Patchwork-id: 70207
+O-Subject: [RHEV7.2.z qemu-kvm-rhev 2/4] block: Pause block jobs in bdrv_drain_all
+Bugzilla: 1329543
+RH-Acked-by: Paolo Bonzini <pbonzini@redhat.com>
+RH-Acked-by: Stefan Hajnoczi <stefanha@redhat.com>
+RH-Acked-by: Fam Zheng <famz@redhat.com>
+
+From: Fam Zheng <famz@redhat.com>
+
+This is necessary to suppress more IO requests from being generated from
+block job coroutines.
+
+Signed-off-by: Fam Zheng <famz@redhat.com>
+Reviewed-by: Stefan Hajnoczi <stefanha@redhat.com>
+Reviewed-by: Paolo Bonzini <pbonzini@redhat.com>
+Reviewed-by: Alberto Garcia <berto@igalia.com>
+Message-id: 1428069921-2957-3-git-send-email-famz@redhat.com
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+Signed-off-by: Kevin Wolf <kwolf@redhat.com>
+(cherry picked from commit 69da3b0b47c8f6016e9109fcfa608e9e7e99bc05)
+Signed-off-by: Jeff Cody <jcody@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ block.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/block.c b/block.c
+index 7e5763b..967f732 100644
+--- a/block.c
++++ b/block.c
+@@ -2031,6 +2031,16 @@ void bdrv_drain_all(void)
+     bool busy = true;
+     BlockDriverState *bs;
+ 
++    QTAILQ_FOREACH(bs, &bdrv_states, device_list) {
++        AioContext *aio_context = bdrv_get_aio_context(bs);
++
++        aio_context_acquire(aio_context);
++        if (bs->job) {
++            block_job_pause(bs->job);
++        }
++        aio_context_release(aio_context);
++    }
++
+     while (busy) {
+         busy = false;
+ 
+@@ -2042,6 +2052,16 @@ void bdrv_drain_all(void)
+             aio_context_release(aio_context);
+         }
+     }
++
++    QTAILQ_FOREACH(bs, &bdrv_states, device_list) {
++        AioContext *aio_context = bdrv_get_aio_context(bs);
++
++        aio_context_acquire(aio_context);
++        if (bs->job) {
++            block_job_resume(bs->job);
++        }
++        aio_context_release(aio_context);
++    }
+ }
+ 
+ /* make a BlockDriverState anonymous by removing from bdrv_state and
+-- 
+1.8.3.1
+

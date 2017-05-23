@@ -1,0 +1,106 @@
+From 23548817df3a6df88afedf622fc14aa8197a7526 Mon Sep 17 00:00:00 2001
+From: Laszlo Ersek <lersek@redhat.com>
+Date: Thu, 29 Sep 2016 11:35:16 +0200
+Subject: [PATCH 3/6] acpi: expose oem_id and oem_table_id in build_rsdt()
+
+RH-Author: Laszlo Ersek <lersek@redhat.com>
+Message-id: <20160929113518.25306-4-lersek@redhat.com>
+Patchwork-id: 72443
+O-Subject: [RHEL-7.2.z qemu-kvm-rhev PATCH 3/5] acpi: expose oem_id and oem_table_id in build_rsdt()
+Bugzilla: 1380310
+RH-Acked-by: Thomas Huth <thuth@redhat.com>
+RH-Acked-by: Igor Mammedov <imammedo@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+
+Since build_rsdt() is implemented as common utility code (in
+"hw/acpi/aml-build.c"), it should expose -- and forward -- the oem_id and
+oem_table_id parameters between board code and the generic build_header()
+function.
+
+Cc: "Michael S. Tsirkin" <mst@redhat.com> (supporter:ACPI/SMBIOS)
+Cc: Igor Mammedov <imammedo@redhat.com> (supporter:ACPI/SMBIOS)
+Cc: Shannon Zhao <zhaoshenglong@huawei.com> (maintainer:ARM ACPI Subsystem)
+Cc: Paolo Bonzini <pbonzini@redhat.com> (maintainer:X86)
+Cc: Richard W.M. Jones <rjones@redhat.com>
+Cc: Aleksei Kovura <alex3kov@zoho.com>
+Cc: Michael Tokarev <mjt@tls.msk.ru>
+Cc: Steven Newbury <steve@snewbury.org.uk>
+RHBZ: https://bugzilla.redhat.com/show_bug.cgi?id=1248758
+LP: https://bugs.launchpad.net/qemu/+bug/1533848
+Signed-off-by: Laszlo Ersek <lersek@redhat.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+Reviewed-by: Shannon Zhao <shannon.zhao@linaro.org>
+(cherry picked from commit 5151355898699eb66fad0a710b8b6011690a0dfc)
+Signed-off-by: Laszlo Ersek <lersek@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ hw/acpi/aml-build.c         | 5 +++--
+ hw/arm/virt-acpi-build.c    | 2 +-
+ hw/i386/acpi-build.c        | 2 +-
+ include/hw/acpi/aml-build.h | 3 ++-
+ 4 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/hw/acpi/aml-build.c b/hw/acpi/aml-build.c
+index 315facc..45432d9 100644
+--- a/hw/acpi/aml-build.c
++++ b/hw/acpi/aml-build.c
+@@ -1206,7 +1206,8 @@ void acpi_build_tables_cleanup(AcpiBuildTables *tables, bool mfre)
+ 
+ /* Build rsdt table */
+ void
+-build_rsdt(GArray *table_data, GArray *linker, GArray *table_offsets)
++build_rsdt(GArray *table_data, GArray *linker, GArray *table_offsets,
++           const char *oem_id, const char *oem_table_id)
+ {
+     AcpiRsdtDescriptorRev1 *rsdt;
+     size_t rsdt_len;
+@@ -1225,5 +1226,5 @@ build_rsdt(GArray *table_data, GArray *linker, GArray *table_offsets)
+                                        sizeof(uint32_t));
+     }
+     build_header(linker, table_data,
+-                 (void *)rsdt, "RSDT", rsdt_len, 1, NULL, NULL);
++                 (void *)rsdt, "RSDT", rsdt_len, 1, oem_id, oem_table_id);
+ }
+diff --git a/hw/arm/virt-acpi-build.c b/hw/arm/virt-acpi-build.c
+index dce1e19..2893cc1 100644
+--- a/hw/arm/virt-acpi-build.c
++++ b/hw/arm/virt-acpi-build.c
+@@ -583,7 +583,7 @@ void virt_acpi_build(VirtGuestInfo *guest_info, AcpiBuildTables *tables)
+ 
+     /* RSDT is pointed to by RSDP */
+     rsdt = tables_blob->len;
+-    build_rsdt(tables_blob, tables->linker, table_offsets);
++    build_rsdt(tables_blob, tables->linker, table_offsets, NULL, NULL);
+ 
+     /* RSDP is in FSEG memory, so allocate it separately */
+     build_rsdp(tables->rsdp, tables->linker, rsdt);
+diff --git a/hw/i386/acpi-build.c b/hw/i386/acpi-build.c
+index c98e73c..0a4c952 100644
+--- a/hw/i386/acpi-build.c
++++ b/hw/i386/acpi-build.c
+@@ -1730,7 +1730,7 @@ void acpi_build(PcGuestInfo *guest_info, AcpiBuildTables *tables)
+ 
+     /* RSDT is pointed to by RSDP */
+     rsdt = tables_blob->len;
+-    build_rsdt(tables_blob, tables->linker, table_offsets);
++    build_rsdt(tables_blob, tables->linker, table_offsets, NULL, NULL);
+ 
+     /* RSDP is in FSEG memory, so allocate it separately */
+     build_rsdp(tables->rsdp, tables->linker, rsdt);
+diff --git a/include/hw/acpi/aml-build.h b/include/hw/acpi/aml-build.h
+index f6c127a..a9c9fd3 100644
+--- a/include/hw/acpi/aml-build.h
++++ b/include/hw/acpi/aml-build.h
+@@ -286,6 +286,7 @@ void acpi_add_table(GArray *table_offsets, GArray *table_data);
+ void acpi_build_tables_init(AcpiBuildTables *tables);
+ void acpi_build_tables_cleanup(AcpiBuildTables *tables, bool mfre);
+ void
+-build_rsdt(GArray *table_data, GArray *linker, GArray *table_offsets);
++build_rsdt(GArray *table_data, GArray *linker, GArray *table_offsets,
++           const char *oem_id, const char *oem_table_id);
+ 
+ #endif
+-- 
+1.8.3.1
+

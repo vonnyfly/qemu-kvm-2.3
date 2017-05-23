@@ -1,0 +1,95 @@
+From 07efa1df45f3481847d78e17244c53ad8f2fe0b4 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 20 Jun 2016 09:06:50 +0200
+Subject: [PATCH 11/16] qemu-char: add qemu_chr_disconnect to close a fd
+ accepted by listen fd
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RH-Author: Marc-André Lureau <marcandre.lureau@redhat.com>
+Message-id: <1466413615-23069-12-git-send-email-marcandre.lureau@redhat.com>
+Patchwork-id: 70703
+O-Subject: [RHEV-7.2.z qemu-kvm-rhev PATCH v2 11/16] qemu-char: add qemu_chr_disconnect to close a fd accepted by listen fd
+Bugzilla: 1348593
+RH-Acked-by: Xiao Wang <jasowang@redhat.com>
+RH-Acked-by: Marcel Apfelbaum <marcel@redhat.com>
+RH-Acked-by: Victor Kaplansky <vkaplans@redhat.com>
+
+From: Tetsuya Mukawa <mukawa@igel.co.jp>
+
+The patch introduces qemu_chr_disconnect(). The function is used for
+closing a fd accepted by listen fd. Though we already have qemu_chr_delete(),
+but it closes not only accepted fd but also listen fd. This new function
+is used when we still want to keep listen fd.
+
+Signed-off-by: Tetsuya Mukawa <mukawa@igel.co.jp>
+Reviewed-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Tested-by: Yuanhan Liu <yuanhan.liu@linux.intel.com>
+Reviewed-by: Yuanhan Liu <yuanhan.liu@linux.intel.com>
+Reviewed-by: Victor Kaplansky <victork@redhat.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+
+(cherry picked from commit 7d9d17f71e580218629a91f72eeef4db1c96b0ae)
+Signed-off-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+---
+ include/sysemu/char.h | 7 +++++++
+ qemu-char.c           | 8 ++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/include/sysemu/char.h b/include/sysemu/char.h
+index 832b7fe..141edbd 100644
+--- a/include/sysemu/char.h
++++ b/include/sysemu/char.h
+@@ -70,6 +70,7 @@ struct CharDriverState {
+     IOReadHandler *chr_read;
+     void *handler_opaque;
+     void (*chr_close)(struct CharDriverState *chr);
++    void (*chr_disconnect)(struct CharDriverState *chr);
+     void (*chr_accept_input)(struct CharDriverState *chr);
+     void (*chr_set_echo)(struct CharDriverState *chr, bool echo);
+     void (*chr_set_fe_open)(struct CharDriverState *chr, int fe_open);
+@@ -124,6 +125,12 @@ CharDriverState *qemu_chr_new_from_opts(QemuOpts *opts,
+  */
+ CharDriverState *qemu_chr_new(const char *label, const char *filename,
+                               void (*init)(struct CharDriverState *s));
++/**
++ * @qemu_chr_disconnect:
++ *
++ * Close a fd accpeted by character backend.
++ */
++void qemu_chr_disconnect(CharDriverState *chr);
+ 
+ /**
+  * @qemu_chr_delete:
+diff --git a/qemu-char.c b/qemu-char.c
+index a405d76..30dc1df 100644
+--- a/qemu-char.c
++++ b/qemu-char.c
+@@ -3837,6 +3837,13 @@ void qemu_chr_fe_release(CharDriverState *s)
+     s->avail_connections++;
+ }
+ 
++void qemu_chr_disconnect(CharDriverState *chr)
++{
++    if (chr->chr_disconnect) {
++        chr->chr_disconnect(chr);
++    }
++}
++
+ void qemu_chr_delete(CharDriverState *chr)
+ {
+     QTAILQ_REMOVE(&chardevs, chr, next);
+@@ -4155,6 +4162,7 @@ static CharDriverState *qmp_chardev_open_socket(ChardevSocket *sock,
+     chr->chr_write = tcp_chr_write;
+     chr->chr_sync_read = tcp_chr_sync_read;
+     chr->chr_close = tcp_chr_close;
++    chr->chr_disconnect = tcp_chr_disconnect;
+     chr->get_msgfds = tcp_get_msgfds;
+     chr->set_msgfds = tcp_set_msgfds;
+     chr->chr_add_client = tcp_chr_add_client;
+-- 
+1.8.3.1
+
