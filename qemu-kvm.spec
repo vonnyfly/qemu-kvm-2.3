@@ -78,7 +78,7 @@ Obsoletes: %1 < %{obsoletes_version}
 Summary: QEMU is a FAST! processor emulator
 Name:    %{pkgname}%{?pkgsuffix}
 Version: 2.3.0
-Release: 35%{?dist}.23
+Release: 36.el7.smartx.23
 # Epoch because we pushed a qemu-1.0 package. AIUI this can't ever be dropped
 Epoch: 10
 License: GPLv2+ and LGPLv2+ and BSD
@@ -1338,6 +1338,10 @@ Patch622: kvm-pc-set-the-OEM-fields-in-the-RSDT-and-the-FADT-from-.patch
 Patch623: kvm-dataplane-fix-virtio-blk-complete_request-race-condi.patch
 
 Patch9999: kvm-iscsi-fix-co-flush.patch
+Patch1024: 0001-trace-remove-malloc-tracing.patch
+Patch1025: 0002-tests-Unique-test-path-for-string-visitor-output.patch
+Patch1026: 0003-fix-test-failed.patch
+
 
 BuildRequires: zlib-devel
 BuildRequires: SDL-devel
@@ -2177,6 +2181,9 @@ ApplyOptionalPatch()
 %patch623 -p1
 
 %patch9999 -p1
+%patch1024 -p1
+%patch1025 -p1
+%patch1026 -p1
 
 ApplyOptionalPatch qemu-kvm-test.patch
 ApplyPatch libiscsi-fix-static-build.patch
